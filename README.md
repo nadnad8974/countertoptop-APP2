@@ -1,17 +1,27 @@
-# Stone Countertop Template Field App (Simulator MVP)
+# Stone Countertop Template Field App (Simulator MVP+)
 
 Original prototype for digital countertop templating workflows in the stone fabrication industry. This project intentionally avoids proprietary Proliner code, visuals, and branding.
 
-## What this MVP does
+## What this version does
 
 - **Job management**: create/open/duplicate/delete countertop jobs.
 - **Template editor in simulator mode**:
-  - Tap in canvas to add measured points.
-  - Manually edit X/Y points in list.
-  - View live connected outline and segment lengths.
-  - Close/open shapes.
-  - Add sink/cooktop cutouts and seam lines.
-- **Multiple pieces per job** (main top, island, vanity, backsplash, separate).
+  - Tap canvas to add measured points.
+  - Manual X/Y point entry panel.
+  - Load sample layouts directly into current section.
+  - Live connected outline + segment dimensions.
+  - Drag points in Select/Move mode.
+  - Insert point between segments in Insert mode.
+  - Pan and zoom controls with reset view.
+  - Lock/unlock finished shapes.
+- **Editing flow**:
+  - Undo / Redo (job-level history stack)
+  - Point list editing and delete
+  - Multi-piece jobs (main top, island, vanity, backsplash, separate)
+- **Countertop tools**:
+  - Sink cutouts
+  - Cooktop cutouts
+  - Seam lines
 - **Offline-first local persistence** via browser localStorage.
 - **Settings** for units, precision, and snap-to-grid.
 - **Exports**:
@@ -28,6 +38,7 @@ Original prototype for digital countertop templating workflows in the stone fabr
 - `src/lib/geometry.ts` - dimensions and snapping helpers
 - `src/lib/storage.ts` - local persistence
 - `src/lib/exporters.ts` - export functions (with DXF placeholder)
+- `src/lib/demoLayouts.ts` - built-in example layouts for simulator mode
 - `src/data/sampleJobs.ts` - 3 demo jobs preloaded
 
 ## Demo data included

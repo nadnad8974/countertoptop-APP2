@@ -1,5 +1,4 @@
 import React, { useMemo, useState } from 'react';
-import { v4 as uuidv4 } from 'uuid';
 import { JobListScreen } from './screens/JobListScreen';
 import { JobDetailsScreen } from './screens/JobDetailsScreen';
 import { TemplateEditorScreen } from './screens/TemplateEditorScreen';
@@ -26,7 +25,7 @@ export default function App() {
   const createJob = () => {
     const now = new Date().toISOString();
     const job: Job = {
-      id: uuidv4(),
+      id: crypto.randomUUID(),
       customerName: '',
       jobName: `New Job ${jobs.length + 1}`,
       address: '',
@@ -36,7 +35,7 @@ export default function App() {
       modifiedAt: now,
       pieces: [
         {
-          id: uuidv4(),
+          id: crypto.randomUUID(),
           name: 'Main Top',
           pieceType: 'main_top',
           points: [],
@@ -80,7 +79,7 @@ export default function App() {
             if (!source) return;
             const copy: Job = {
               ...source,
-              id: uuidv4(),
+              id: crypto.randomUUID(),
               jobName: `${source.jobName} (Copy)`,
               createdAt: new Date().toISOString(),
               modifiedAt: new Date().toISOString()
