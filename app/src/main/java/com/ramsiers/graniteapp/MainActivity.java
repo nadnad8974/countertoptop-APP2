@@ -3,6 +3,7 @@ package com.ramsiers.graniteapp;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ClipData;
+import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Color;
@@ -13,6 +14,7 @@ import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageView;
@@ -35,6 +37,7 @@ import java.util.Locale;
 
 public class MainActivity extends Activity {
     private static final int PICK_IMAGE = 901;
+    private static final int TOTAL_STEPS = 21;
     private static final String PREFS = "ramsiers_granite_app";
     private static final String MSI_VISUALIZER = "https://www.msisurfaces.com/room-visualizer-tools/";
 
@@ -44,9 +47,11 @@ public class MainActivity extends Activity {
 
     private SharedPreferences prefs;
     private ScrollView scroll;
-    private LinearLayout root;
+    private LinearLayout page;
+    private LinearLayout navigation;
     private LinearLayout slabList;
     private LinearLayout sectionList;
+
     private EditText customerName;
     private EditText customerPhone;
     private EditText customerEmail;
@@ -64,6 +69,7 @@ public class MainActivity extends Activity {
     private EditText edgeCharge;
     private EditText tearOutCharge;
     private EditText otherCharge;
+
     private TextView squareFootResult;
     private TextView totalResult;
     private TextView photoStatus;
@@ -80,37 +86,62 @@ public class MainActivity extends Activity {
     }
 
     private void buildUi() {
+        LinearLayout screen = new LinearLayout(this);
+        screen.setOrientation(LinearLayout.VERTICAL);
+        screen.setBackgroundColor(Color.rgb(248, 246, 243));
+
         scroll = new ScrollView(this);
         scroll.setFillViewport(true);
-        root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(16), dp(12), dp(16), dp(24));
-        root.setBackgroundColor(Color.rgb(248, 246, 243));
-        scroll.addView(root);
-        customerName = input("Customer name", InputType.TYPE_CLASS_TEXT);
-        customerPhone = input("Phone number", InputType.TYPE_CLASS_PHONE);
-        customerEmail = input("Customer email", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
-        projectAddress = input("Project address", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
-        projectNotes = input("Project notes", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
-        projectNotes.setMinLines(3);
-        officeEmail = input("RAMSIER'S office email (saved on this phone)", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
+        page = new LinearLayout(this);
+        page.setOrientation(LinearLayout.VERTICAL);
+        page.setGravity(Gravity.CENTER_HORIZONTAL);
+        page.setPadding(dp(16), dp(12), dp(16), dp(28));
+        scroll.addView(page, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        navigation = new LinearLayout(this);
+        navigation.setOrientation(LinearLayout.HORIZONTAL);
+        navigation.setGravity(Gravity.CENTER);
+        navigation.setPadding(dp(12), dp(8), dp(12), dp(10));
+        navigation.setBackgroundColor(Color.rgb(248, 246, 243));
+
+        screen.addView(scroll, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        screen.addView(navigation, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        customerName = input("Type the customer's full name", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+        customerPhone = input("Type the customer's phone number", InputType.TYPE_CLASS_PHONE);
+        customerEmail = input("Type the customer's email", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
+        projectAddress = input("Type the project address", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+        projectNotes = input("Type any project notes", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        projectNotes.setMinLines(4);
+        projectNotes.setGravity(Gravity.TOP);
+
+        officeEmail = input("RAMSIER'S office email", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
         officeEmail.setText(prefs.getString("office_email", ""));
+
         slabList = new LinearLayout(this);
         slabList.setOrientation(LinearLayout.VERTICAL);
-        sectionName = input("Section name, such as Island", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+
+        sectionName = input("Example: Island or Main wall", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
         lengthIn = input("Length in inches", decimalInput());
         widthIn = input("Width in inches", decimalInput());
         quantity = input("Quantity", decimalInput());
         quantity.setText("1");
+
         sectionList = new LinearLayout(this);
         sectionList.setOrientation(LinearLayout.VERTICAL);
-        stoveLength = input("Stove opening length in inches", decimalInput());
-        stoveWidth = input("Stove opening width in inches", decimalInput());
+
+        stoveLength = input("Leave blank if there is no opening", decimalInput());
+        stoveWidth = input("Leave blank if there is no opening", decimalInput());
         pricePerSqFt = input("Installed price per square foot", decimalInput());
-        sinkCharge = input("Sink / cutout charge", decimalInput());
-        edgeCharge = input("Edge or extra labor charge", decimalInput());
-        tearOutCharge = input("Tear-out charge", decimalInput());
-        otherCharge = input("Other charges", decimalInput());
+        sinkCharge = input("Enter 0 if there is no charge", decimalInput());
+        edgeCharge = input("Enter 0 if there is no charge", decimalInput());
+        tearOutCharge = input("Enter 0 if there is no charge", decimalInput());
+        otherCharge = input("Enter 0 if there is no charge", decimalInput());
+
         squareFootResult = resultLabel("Net square footage: 0.00");
         totalResult = resultLabel("Estimated total: $0.00");
         photoStatus = label("No photo selected.");
@@ -118,210 +149,287 @@ public class MainActivity extends Activity {
         roomPhoto = new ImageView(this);
         roomPhoto.setAdjustViewBounds(true);
         roomPhoto.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        setContentView(scroll);
+
+        setContentView(screen);
         showStep();
     }
 
     private void showStep() {
-        root.removeAllViews();
-        TextView title = new TextView(this);
-        title.setText("RAMSIER'S\nGRANITE AND QUARTZ");
-        title.setTextSize(27);
-        title.setTypeface(Typeface.DEFAULT_BOLD);
-        title.setTextColor(Color.rgb(91, 58, 41));
-        title.setGravity(Gravity.CENTER);
-        title.setPadding(0, dp(10), 0, dp(2));
-        root.addView(title);
+        page.removeAllViews();
+        navigation.removeAllViews();
 
-        TextView progress = label("Question " + (stepIndex + 1) + " of 16");
+        addBrandHeader();
+        TextView progress = label("Question " + (stepIndex + 1) + " of " + TOTAL_STEPS);
         progress.setGravity(Gravity.CENTER);
         progress.setTextColor(Color.GRAY);
-        root.addView(progress);
+        page.addView(progress);
 
         switch (stepIndex) {
             case 0:
-                addQuestion("Customer name", customerName);
+                addQuestion("What is the customer's name?", customerName, true);
                 break;
             case 1:
-                addQuestion("Phone number", customerPhone);
+                addQuestion("What is the customer's phone number?", customerPhone, true);
                 break;
             case 2:
-                addQuestion("Customer email", customerEmail);
+                addQuestion("What is the customer's email address?", customerEmail, true);
                 break;
             case 3:
-                addQuestion("Project address", projectAddress);
+                addQuestion("What is the project address?", projectAddress, true);
                 break;
             case 4:
-                addQuestion("Project notes", projectNotes);
+                addQuestion("Are there any project notes?", projectNotes, true);
                 break;
             case 5:
-                addQuestion("RAMSIER'S office email", officeEmail);
+                addQuestion("What email should receive the quote request?", officeEmail, true);
+                addHelp("This RAMSIER'S office email is saved on this phone.");
                 break;
             case 6:
                 addSlabStep();
                 break;
             case 7:
-                addQuestion("Countertop section name", sectionName);
+                addQuestion("What should this countertop section be called?", sectionName, true);
                 break;
             case 8:
-                addQuestion("Length in inches", lengthIn);
+                addQuestion("What is the section length in inches?", lengthIn, true);
                 break;
             case 9:
-                addQuestion("Width in inches", widthIn);
+                addQuestion("What is the section width in inches?", widthIn, true);
                 break;
             case 10:
-                addQuestion("Quantity", quantity);
-                TextView saveHelp = label("Tap OK to save this countertop section.");
-                saveHelp.setGravity(Gravity.CENTER);
-                root.addView(saveHelp);
+                addQuestion("How many identical sections are there?", quantity, true);
+                addHelp("Tapping Next saves this countertop section.");
                 break;
             case 11:
-                addTwoFieldQuestion("Slide-in stove opening to subtract", stoveLength, stoveWidth, "Leave both blank if there is no stove opening.");
+                addAnotherSectionStep();
                 break;
             case 12:
-                addQuestion("Installed price per square foot", pricePerSqFt);
+                addQuestion("What is the slide-in stove opening length?", stoveLength, true);
+                addHelp("Leave this blank if there is no slide-in stove opening.");
                 break;
             case 13:
-                addChargeStep();
+                addQuestion("What is the slide-in stove opening width?", stoveWidth, true);
+                addHelp("Leave this blank if there is no slide-in stove opening.");
                 break;
             case 14:
+                addQuestion("What is the installed price per square foot?", pricePerSqFt, true);
+                break;
+            case 15:
+                addQuestion("What is the sink or cutout charge?", sinkCharge, true);
+                break;
+            case 16:
+                addQuestion("What is the edge or extra labor charge?", edgeCharge, true);
+                break;
+            case 17:
+                addQuestion("What is the tear-out charge?", tearOutCharge, true);
+                break;
+            case 18:
+                addQuestion("Are there any other charges?", otherCharge, true);
+                break;
+            case 19:
                 addPhotoStep();
                 break;
             default:
                 addReviewStep();
                 break;
         }
+
         addNavigation();
         scroll.post(() -> scroll.smoothScrollTo(0, 0));
     }
 
-    private void addQuestion(String title, EditText input) {
-        root.addView(sectionHeader(title));
-        addField(input);
-        input.requestFocus();
+    private void addBrandHeader() {
+        TextView title = new TextView(this);
+        title.setText("RAMSIER'S\nGRANITE AND QUARTZ");
+        title.setTextSize(26);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setTextColor(Color.rgb(91, 58, 41));
+        title.setGravity(Gravity.CENTER);
+        title.setPadding(0, dp(8), 0, dp(2));
+        page.addView(title);
     }
 
-    private void addTwoFieldQuestion(String title, EditText first, EditText second, String helpText) {
-        root.addView(sectionHeader(title));
-        TextView help = label(helpText);
+    private void addQuestion(String title, EditText field, boolean focus) {
+        page.addView(questionTitle(title));
+        detach(field);
+        page.addView(field);
+        if (focus) {
+            field.requestFocus();
+            field.postDelayed(() -> {
+                scroll.smoothScrollTo(0, Math.max(0, field.getTop() - dp(24)));
+                showKeyboard(field);
+            }, 220);
+        }
+    }
+
+    private void addHelp(String text) {
+        TextView help = label(text);
         help.setTextSize(14);
-        root.addView(help);
-        addField(first);
-        addField(second);
-        first.requestFocus();
+        help.setGravity(Gravity.CENTER);
+        help.setTextColor(Color.DKGRAY);
+        page.addView(help);
     }
 
     private void addSlabStep() {
-        root.addView(sectionHeader("Slab choices"));
-        TextView scanHelp = label("Scan MSI slab QR codes or type a slab color. MSI links will open from the saved list.");
-        scanHelp.setTextSize(14);
-        root.addView(scanHelp);
+        hideKeyboard();
+        page.addView(questionTitle("Which slabs does the customer like?"));
+        addHelp("Scan MSI slab QR codes or add a slab color manually. Add as many as needed, then tap Next.");
 
         Button scanButton = primaryButton("Scan slab QR code");
         scanButton.setOnClickListener(v -> startQrScan());
-        root.addView(scanButton);
+        page.addView(scanButton);
 
         Button manualButton = secondaryButton("Add slab manually");
         manualButton.setOnClickListener(v -> showManualSlabDialog());
-        root.addView(manualButton);
+        page.addView(manualButton);
 
         detach(slabList);
-        root.addView(slabList);
+        page.addView(slabList);
         renderSlabs();
     }
 
-    private void addChargeStep() {
-        root.addView(sectionHeader("Extra charges"));
-        addField(sinkCharge);
-        addField(edgeCharge);
-        addField(tearOutCharge);
-        addField(otherCharge);
-        sinkCharge.requestFocus();
+    private void addAnotherSectionStep() {
+        hideKeyboard();
+        page.addView(questionTitle("Would you like to add another countertop section?"));
+        addHelp("The section you just entered has been saved.");
+
+        detach(sectionList);
+        page.addView(sectionList);
+        renderSections();
+
+        Button addAnother = primaryButton("Yes, add another section");
+        addAnother.setOnClickListener(v -> {
+            sectionName.setText("");
+            lengthIn.setText("");
+            widthIn.setText("");
+            quantity.setText("1");
+            stepIndex = 7;
+            showStep();
+        });
+        page.addView(addAnother);
+        addHelp("Tap Next below to continue without adding another section.");
     }
 
     private void addPhotoStep() {
-        root.addView(sectionHeader("Countertop photo"));
-        Button photoButton = secondaryButton("Upload kitchen / countertop photo");
+        hideKeyboard();
+        page.clearFocus();
+        page.addView(questionTitle("Would you like to add a countertop photo?"));
+        addHelp("The photo screen is separate from all typing screens, so the keyboard will not cover it.");
+
+        Button photoButton = primaryButton("Choose kitchen or countertop photo");
         photoButton.setOnClickListener(v -> openPhotoPicker());
-        root.addView(photoButton);
+        page.addView(photoButton);
+
         detach(photoStatus);
-        root.addView(photoStatus);
+        page.addView(photoStatus);
         detach(roomPhoto);
-        root.addView(roomPhoto, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(220)));
+        page.addView(roomPhoto, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(220)));
 
         Button visualizer = secondaryButton("Open MSI room visualizer");
         visualizer.setOnClickListener(v -> openWebPage(MSI_VISUALIZER));
-        root.addView(visualizer);
+        page.addView(visualizer);
+        addHelp("You may skip the photo and tap Next.");
     }
 
     private void addReviewStep() {
+        hideKeyboard();
+        page.clearFocus();
         calculateAndDisplay(false);
-        root.addView(sectionHeader("Review and send"));
+        page.addView(questionTitle("Review the quote request"));
+
+        TextView customer = label(
+                "Customer: " + text(customerName) + "\n" +
+                "Phone: " + text(customerPhone) + "\n" +
+                "Email: " + text(customerEmail) + "\n" +
+                "Address: " + text(projectAddress));
+        customer.setBackgroundColor(Color.WHITE);
+        customer.setPadding(dp(12), dp(12), dp(12), dp(12));
+        page.addView(customer);
+
+        page.addView(sectionHeader("Countertop sections"));
         detach(sectionList);
-        root.addView(sectionList);
+        page.addView(sectionList);
         renderSections();
+
+        page.addView(sectionHeader("Selected slabs"));
         detach(slabList);
-        root.addView(slabList);
+        page.addView(slabList);
         renderSlabs();
+
         detach(squareFootResult);
-        root.addView(squareFootResult);
+        page.addView(squareFootResult);
         detach(totalResult);
-        root.addView(totalResult);
+        page.addView(totalResult);
 
         Button reset = secondaryButton("Start a new customer");
         reset.setOnClickListener(v -> confirmReset());
-        root.addView(reset);
+        page.addView(reset);
     }
 
     private void addNavigation() {
-        LinearLayout nav = new LinearLayout(this);
-        nav.setOrientation(LinearLayout.HORIZONTAL);
-        nav.setGravity(Gravity.CENTER);
-        nav.setPadding(0, dp(16), 0, 0);
-
         Button back = secondaryButton("Back");
         back.setEnabled(stepIndex > 0);
         back.setOnClickListener(v -> {
+            hideKeyboard();
             stepIndex = Math.max(0, stepIndex - 1);
             showStep();
         });
-        nav.addView(back, new LinearLayout.LayoutParams(0, dp(52), 1f));
+        navigation.addView(back, new LinearLayout.LayoutParams(0, dp(54), 1f));
 
-        Button next = primaryButton(stepIndex >= 15 ? "Send email" : "OK");
+        String nextText;
+        if (stepIndex >= TOTAL_STEPS - 1) {
+            nextText = "Send email";
+        } else if (stepIndex == 11) {
+            nextText = "No, continue";
+        } else {
+            nextText = "Next";
+        }
+
+        Button next = primaryButton(nextText);
         next.setOnClickListener(v -> handleNext());
-        LinearLayout.LayoutParams nextParams = new LinearLayout.LayoutParams(0, dp(52), 1f);
+        LinearLayout.LayoutParams nextParams = new LinearLayout.LayoutParams(0, dp(54), 1f);
         nextParams.setMargins(dp(8), 0, 0, 0);
-        nav.addView(next, nextParams);
-        root.addView(nav);
+        navigation.addView(next, nextParams);
     }
 
     private void handleNext() {
+        if (stepIndex == 0 && customerName.getText().toString().trim().isEmpty()) {
+            Toast.makeText(this, "Enter the customer's name.", Toast.LENGTH_SHORT).show();
+            customerName.requestFocus();
+            return;
+        }
         if (stepIndex == 5) {
-            prefs.edit().putString("office_email", officeEmail.getText().toString().trim()).apply();
+            String email = officeEmail.getText().toString().trim();
+            if (email.isEmpty() || !email.contains("@")) {
+                Toast.makeText(this, "Enter the RAMSIER'S office email.", Toast.LENGTH_LONG).show();
+                officeEmail.requestFocus();
+                return;
+            }
+            prefs.edit().putString("office_email", email).apply();
+        }
+        if (stepIndex == 8 && value(lengthIn) <= 0) {
+            Toast.makeText(this, "Enter a length greater than zero.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (stepIndex == 9 && value(widthIn) <= 0) {
+            Toast.makeText(this, "Enter a width greater than zero.", Toast.LENGTH_SHORT).show();
+            return;
         }
         if (stepIndex == 10 && !addCounterSection()) {
             return;
         }
-        if (stepIndex >= 15) {
+        if (stepIndex >= TOTAL_STEPS - 1) {
             sendQuoteEmail();
             return;
         }
+
+        hideKeyboard();
         stepIndex += 1;
         showStep();
     }
 
-    private void addField(View view) {
-        detach(view);
-        root.addView(view);
-    }
-
-    private void detach(View view) {
-        if (view.getParent() instanceof ViewGroup) {
-            ((ViewGroup) view.getParent()).removeView(view);
-        }
-    }
-
     private void startQrScan() {
+        hideKeyboard();
         IntentIntegrator integrator = new IntentIntegrator(this);
         integrator.setPrompt("Point the camera at the slab QR code");
         integrator.setBeepEnabled(true);
@@ -333,12 +441,17 @@ public class MainActivity extends Activity {
     private void showManualSlabDialog() {
         final EditText entry = input("Slab color, item number, or note", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         entry.setMinLines(2);
-        new AlertDialog.Builder(this)
+        AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("Add slab manually")
                 .setView(entry)
-                .setPositiveButton("Add", (dialog, which) -> addSlab(entry.getText().toString()))
+                .setPositiveButton("Add", (d, which) -> addSlab(entry.getText().toString()))
                 .setNegativeButton("Cancel", null)
-                .show();
+                .create();
+        dialog.setOnShowListener(d -> {
+            entry.requestFocus();
+            entry.postDelayed(() -> showKeyboard(entry), 180);
+        });
+        dialog.show();
     }
 
     private void addSlab(String rawValue) {
@@ -407,7 +520,10 @@ public class MainActivity extends Activity {
             row.setOrientation(LinearLayout.VERTICAL);
             TextView text = label((i + 1) + ". " + slab.name + "\n" + slab.raw);
             text.setTextSize(14);
-            row.addView(text, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            row.addView(text, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT));
+
             LinearLayout buttons = new LinearLayout(this);
             buttons.setOrientation(LinearLayout.HORIZONTAL);
             if (isWebUrl(slab.raw)) {
@@ -441,10 +557,6 @@ public class MainActivity extends Activity {
         String name = sectionName.getText().toString().trim();
         if (name.isEmpty()) name = "Countertop section " + (sections.size() + 1);
         sections.add(new CounterSection(name, length, width, qty));
-        sectionName.setText("");
-        lengthIn.setText("");
-        widthIn.setText("");
-        quantity.setText("1");
         saveLists();
         renderSections();
         calculateAndDisplay(false);
@@ -485,13 +597,6 @@ public class MainActivity extends Activity {
         double gross = 0;
         for (CounterSection section : sections) gross += section.squareFeet();
 
-        if (sections.isEmpty()) {
-            double currentLength = value(lengthIn);
-            double currentWidth = value(widthIn);
-            double currentQty = Math.max(1, value(quantity));
-            if (currentLength > 0 && currentWidth > 0) gross = (currentLength * currentWidth * currentQty) / 144.0;
-        }
-
         double stove = (value(stoveLength) * value(stoveWidth)) / 144.0;
         double net = Math.max(0, gross - stove);
         double total = net * value(pricePerSqFt)
@@ -510,6 +615,7 @@ public class MainActivity extends Activity {
     }
 
     private void openPhotoPicker() {
+        hideKeyboard();
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("image/*");
@@ -539,8 +645,9 @@ public class MainActivity extends Activity {
     private void sendQuoteEmail() {
         String to = officeEmail.getText().toString().trim();
         if (to.isEmpty() || !to.contains("@")) {
-            officeEmail.requestFocus();
-            Toast.makeText(this, "Enter RAMSIER'S office email first. It will be saved for next time.", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "Enter RAMSIER'S office email first.", Toast.LENGTH_LONG).show();
+            stepIndex = 5;
+            showStep();
             return;
         }
         prefs.edit().putString("office_email", to).apply();
@@ -628,10 +735,27 @@ public class MainActivity extends Activity {
         photoStatus.setText("No photo selected.");
         squareFootResult.setText("Net square footage: 0.00");
         totalResult.setText("Estimated total: $0.00");
+        stepIndex = 0;
         saveLists();
-        renderSlabs();
-        renderSections();
+        showStep();
         Toast.makeText(this, "Ready for a new customer.", Toast.LENGTH_SHORT).show();
+    }
+
+    private void showKeyboard(View view) {
+        InputMethodManager inputMethodManager = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (inputMethodManager != null) {
+            inputMethodManager.showSoftInput(view, InputMethodManager.SHOW_IMPLICIT);
+        }
+    }
+
+    private void hideKeyboard() {
+        View current = getCurrentFocus();
+        if (current == null) current = page;
+        InputMethodManager inputMethodManager = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (inputMethodManager != null) {
+            inputMethodManager.hideSoftInputFromWindow(current.getWindowToken(), 0);
+        }
+        current.clearFocus();
     }
 
     private void openWebPage(String url) {
@@ -656,9 +780,7 @@ public class MainActivity extends Activity {
     }
 
     private String cleanMsiSearch(String value) {
-        return value.replace("MSI:", "")
-                .replace("...", "")
-                .trim();
+        return value.replace("MSI:", "").replace("...", "").trim();
     }
 
     private void saveLists() {
@@ -728,16 +850,29 @@ public class MainActivity extends Activity {
         return InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL;
     }
 
+    private TextView questionTitle(String text) {
+        TextView view = new TextView(this);
+        view.setText(text);
+        view.setTextSize(24);
+        view.setTypeface(Typeface.DEFAULT_BOLD);
+        view.setTextColor(Color.rgb(91, 58, 41));
+        view.setGravity(Gravity.CENTER);
+        view.setPadding(dp(8), dp(34), dp(8), dp(18));
+        return view;
+    }
+
     private TextView sectionHeader(String text) {
         TextView view = new TextView(this);
         view.setText(text);
-        view.setTextSize(20);
+        view.setTextSize(18);
         view.setTypeface(Typeface.DEFAULT_BOLD);
         view.setTextColor(Color.WHITE);
         view.setBackgroundColor(Color.rgb(91, 58, 41));
         view.setPadding(dp(12), dp(10), dp(12), dp(10));
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        params.setMargins(0, dp(20), 0, dp(8));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        params.setMargins(0, dp(18), 0, dp(8));
         view.setLayoutParams(params);
         return view;
     }
@@ -765,11 +900,15 @@ public class MainActivity extends Activity {
         EditText editText = new EditText(this);
         editText.setHint(hint);
         editText.setInputType(type);
-        editText.setTextSize(16);
-        editText.setPadding(dp(10), dp(7), dp(10), dp(7));
+        editText.setTextSize(19);
+        editText.setSingleLine((type & InputType.TYPE_TEXT_FLAG_MULTI_LINE) == 0);
+        editText.setPadding(dp(14), dp(14), dp(14), dp(14));
         editText.setBackgroundColor(Color.WHITE);
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        params.setMargins(0, dp(4), 0, dp(4));
+        editText.setSelectAllOnFocus(false);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        params.setMargins(0, dp(8), 0, dp(12));
         editText.setLayoutParams(params);
         return editText;
     }
@@ -782,8 +921,9 @@ public class MainActivity extends Activity {
         button.setTypeface(Typeface.DEFAULT_BOLD);
         button.setTextColor(Color.WHITE);
         button.setBackgroundColor(Color.rgb(182, 132, 69));
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52));
-        params.setMargins(0, dp(5), 0, dp(5));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(54));
+        params.setMargins(0, dp(6), 0, dp(6));
         button.setLayoutParams(params);
         return button;
     }
@@ -795,7 +935,8 @@ public class MainActivity extends Activity {
         button.setTextSize(15);
         button.setTextColor(Color.rgb(91, 58, 41));
         button.setBackgroundColor(Color.rgb(239, 230, 220));
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(50));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(52));
         params.setMargins(0, dp(4), 0, dp(4));
         button.setLayoutParams(params);
         return button;
@@ -818,10 +959,18 @@ public class MainActivity extends Activity {
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setPadding(dp(8), dp(7), dp(5), dp(7));
         row.setBackgroundColor(Color.WHITE);
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
         params.setMargins(0, dp(3), 0, dp(3));
         row.setLayoutParams(params);
         return row;
+    }
+
+    private void detach(View view) {
+        if (view.getParent() instanceof ViewGroup) {
+            ((ViewGroup) view.getParent()).removeView(view);
+        }
     }
 
     private int dp(int value) {
