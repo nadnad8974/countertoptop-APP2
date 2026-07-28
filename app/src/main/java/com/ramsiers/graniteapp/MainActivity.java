@@ -253,6 +253,9 @@ public class MainActivity extends Activity {
         page.addView(questionTitle(title));
         detach(field);
         page.addView(field);
+        Button inlineNext = primaryButton(nextButtonText());
+        inlineNext.setOnClickListener(v -> handleNext());
+        page.addView(inlineNext);
         if (focus) {
             field.requestFocus();
             field.postDelayed(() -> {
@@ -376,20 +379,21 @@ public class MainActivity extends Activity {
         });
         navigation.addView(back, new LinearLayout.LayoutParams(0, dp(54), 1f));
 
-        String nextText;
-        if (stepIndex >= TOTAL_STEPS - 1) {
-            nextText = "Send email";
-        } else if (stepIndex == 11) {
-            nextText = "No, continue";
-        } else {
-            nextText = "Next";
-        }
-
-        Button next = primaryButton(nextText);
+        Button next = primaryButton(nextButtonText());
         next.setOnClickListener(v -> handleNext());
         LinearLayout.LayoutParams nextParams = new LinearLayout.LayoutParams(0, dp(54), 1f);
         nextParams.setMargins(dp(8), 0, 0, 0);
         navigation.addView(next, nextParams);
+    }
+
+    private String nextButtonText() {
+        if (stepIndex >= TOTAL_STEPS - 1) {
+            return "Send email";
+        }
+        if (stepIndex == 11) {
+            return "No, continue";
+        }
+        return "Next";
     }
 
     private void handleNext() {
