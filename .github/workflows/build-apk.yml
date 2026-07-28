@@ -6,6 +6,7 @@ on:
     paths-ignore:
       - 'RamsiersGraniteApp-debug.apk'
       - 'build-error.log'
+      - 'full-build.log'
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -46,16 +47,16 @@ jobs:
           set +e
           gradle :app:assembleDebug --stacktrace 2>&1 | tee full-build.log
           result=${PIPESTATUS[0]}
-          tail -n 250 full-build.log > build-error.log
+          grep -E -B 20 -A 40 "Duplicate class|defined multiple times|What went wrong|Execution failed| error:| FAILED" full-build.log > build-error.log || true
           exit $result
 
-      - name: Save compiler error log
+      - name: Save compiler logs
         if: failure() && github.event_name == 'push'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add build-error.log
-          git commit -m "Save Android build error log [skip ci]" || exit 0
+          git add build-error.log full-build.log
+          git commit -m "Save full Android build error log [skip ci]" || exit 0
           git push
 
       - name: Copy APK to repository root
