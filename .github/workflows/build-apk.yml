@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths-ignore:
       - 'RamsiersGraniteApp-debug.apk'
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -50,6 +52,7 @@ jobs:
           retention-days: 30
 
       - name: Commit latest APK for phone download
+        if: github.event_name == 'push'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
