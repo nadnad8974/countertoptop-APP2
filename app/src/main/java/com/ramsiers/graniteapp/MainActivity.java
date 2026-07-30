@@ -48,8 +48,8 @@ public class MainActivity extends Activity {
     private static final String PRICE_FAUCET = "price_faucet";
     private static final String PRICE_BASKET = "price_basket";
     private static final String PRICE_GRID = "price_grid";
-    private static final String DEFAULT_PAGE_ORDER = "0,1,2,3,4,5,6,7,8,13,14,15,16,17,18,9,10,11,12";
-    private static final String ALL_BUILT_IN_PAGES = "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,100,101,102,103,104,105,106";
+    private static final String DEFAULT_PAGE_ORDER = "0,1,2,3,4,5,6,7,8,13,14,15,16,17,18,19,9,10,11,12";
+    private static final String ALL_BUILT_IN_PAGES = "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,100,101,102,103,104,105,106";
     private static final int CUSTOM_PAGE_START = 1000;
     private static final int PAGE_NAME = 0;
     private static final int PAGE_PHONE = 1;
@@ -70,6 +70,7 @@ public class MainActivity extends Activity {
     private static final int PAGE_BASKETS = 16;
     private static final int PAGE_GRIDS = 17;
     private static final int PAGE_CABINETS = 18;
+    private static final int PAGE_BUY_CABINETS = 19;
     private static final int PAGE_SECTION_NAME = 100;
     private static final int PAGE_SECTION_LENGTH = 101;
     private static final int PAGE_SECTION_WIDTH = 102;
@@ -120,6 +121,7 @@ public class MainActivity extends Activity {
     private boolean basketsYes;
     private boolean gridsYes;
     private boolean cabinetsInYes;
+    private boolean wantsToBuyCabinets;
     private String edgeDetail = "Eased and polished";
     private String sinkSelection = "Not selected";
 
@@ -297,6 +299,9 @@ public class MainActivity extends Activity {
                 break;
             case PAGE_CABINETS:
                 addCabinetsStep();
+                break;
+            case PAGE_BUY_CABINETS:
+                addBuyCabinetsStep();
                 break;
             case PAGE_PHOTO:
                 addPhotoStep();
@@ -505,6 +510,16 @@ public class MainActivity extends Activity {
         page.addView(choices);
         detach(cabinetsApproximateDate);
         page.addView(cabinetsApproximateDate);
+        addInlineNavigation();
+    }
+
+    private void addBuyCabinetsStep() {
+        hideKeyboard();
+        page.addView(questionTitle(questionForEdit(PAGE_BUY_CABINETS)));
+        RadioGroup choices = yesNoGroup(wantsToBuyCabinets);
+        choices.setOnCheckedChangeListener((group, checkedId) ->
+                wantsToBuyCabinets = checkedYes(group, checkedId));
+        page.addView(choices);
         addInlineNavigation();
     }
 
@@ -1388,7 +1403,8 @@ public class MainActivity extends Activity {
                 + (gridsYes ? " - " + number.format(value(gridQuantity))
                 + " × " + money(gridPrice) + " = " + money(gridTotal) : "")
                 + "\nCabinets are in: " + yesNo(cabinetsInYes)
-                + "\nApproximate cabinet date: " + textOrNotProvided(cabinetsApproximateDate);
+                + "\nApproximate cabinet date: " + textOrNotProvided(cabinetsApproximateDate)
+                + "\nWould like to buy cabinets: " + yesNo(wantsToBuyCabinets);
     }
 
     private void openPhotoPicker() {
@@ -1533,6 +1549,7 @@ public class MainActivity extends Activity {
         basketsYes = false;
         gridsYes = false;
         cabinetsInYes = false;
+        wantsToBuyCabinets = false;
         edgeDetail = "Eased and polished";
         sinkSelection = "Not selected";
         roomPhoto.setImageDrawable(null);
@@ -1608,6 +1625,7 @@ public class MainActivity extends Activity {
             case PAGE_BASKETS: return "Basket drains";
             case PAGE_GRIDS: return "Big grids";
             case PAGE_CABINETS: return "Cabinet status";
+            case PAGE_BUY_CABINETS: return "Buy cabinets";
             case PAGE_SECTION_NAME: return "Countertop section name";
             case PAGE_SECTION_LENGTH: return "Section length";
             case PAGE_SECTION_WIDTH: return "Section width";
@@ -1654,6 +1672,7 @@ public class MainActivity extends Activity {
             case PAGE_BASKETS: return questionText(pageId, "Would you like basket drains?");
             case PAGE_GRIDS: return questionText(pageId, "Would you like big grids?");
             case PAGE_CABINETS: return questionText(pageId, "Are the cabinets in?");
+            case PAGE_BUY_CABINETS: return questionText(pageId, "Would you like to buy cabinets from RAMSIER'S?");
             case PAGE_SECTION_NAME: return questionText(pageId, "What should this countertop section be called?");
             case PAGE_SECTION_LENGTH: return questionText(pageId, "What is the section length in inches?");
             case PAGE_SECTION_WIDTH: return questionText(pageId, "What is the section width in inches?");
@@ -1727,6 +1746,7 @@ public class MainActivity extends Activity {
             loadDefaultPageOrder();
         }
         addNewPricingPagesOnce();
+        addCabinetSalesPageOnce();
     }
 
     private void addNewPricingPagesOnce() {
@@ -1749,6 +1769,17 @@ public class MainActivity extends Activity {
         }
         savePageOrder();
         prefs.edit().putBoolean("v1_14_pricing_pages_added", true).apply();
+    }
+
+    private void addCabinetSalesPageOnce() {
+        if (prefs.getBoolean("v1_19_cabinet_sales_page_added", false)) return;
+        if (!pageOrder.contains(PAGE_BUY_CABINETS)) {
+            int cabinetStatus = pageOrder.indexOf(PAGE_CABINETS);
+            int insertAt = cabinetStatus >= 0 ? cabinetStatus + 1 : pageOrder.size();
+            pageOrder.add(insertAt, PAGE_BUY_CABINETS);
+            savePageOrder();
+        }
+        prefs.edit().putBoolean("v1_19_cabinet_sales_page_added", true).apply();
     }
 
     private void loadDefaultPageOrder() {
@@ -1828,6 +1859,7 @@ public class MainActivity extends Activity {
                 || pageId == PAGE_BASKETS
                 || pageId == PAGE_GRIDS
                 || pageId == PAGE_CABINETS
+                || pageId == PAGE_BUY_CABINETS
                 || pageId == PAGE_SECTION_NAME
                 || pageId == PAGE_SECTION_LENGTH
                 || pageId == PAGE_SECTION_WIDTH
