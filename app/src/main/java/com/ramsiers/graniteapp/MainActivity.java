@@ -39,7 +39,7 @@ import java.util.Locale;
 public class MainActivity extends Activity {
     private static final int PICK_IMAGE = 901;
     private static final String PREFS = "ramsiers_granite_app";
-    private static final String MSI_VISUALIZER = "https://www.msisurfaces.com/room-visualizer-tools/";
+    private static final String MSI_VISUALIZER = "https://www.roomvo.com/my/msi/?product_type=1&multi_product_visualizer=5";
     private static final String DEFAULT_PAGE_ORDER = "0,1,2,3,4,5,6,7,8,9,10,11,12";
     private static final String ALL_BUILT_IN_PAGES = "0,1,2,3,4,5,6,7,8,9,10,11,12,100,101,102,103,104,105,106";
     private static final int CUSTOM_PAGE_START = 1000;
