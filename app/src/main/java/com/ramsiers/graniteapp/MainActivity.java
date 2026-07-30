@@ -37,7 +37,7 @@ import java.util.Locale;
 
 public class MainActivity extends Activity {
     private static final int PICK_IMAGE = 901;
-    private static final int TOTAL_STEPS = 21;
+    private static final int TOTAL_STEPS = 14;
     private static final String PREFS = "ramsiers_granite_app";
     private static final String MSI_VISUALIZER = "https://www.msisurfaces.com/room-visualizer-tools/";
 
@@ -95,7 +95,7 @@ public class MainActivity extends Activity {
         page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
         page.setGravity(Gravity.CENTER_HORIZONTAL);
-        page.setPadding(dp(16), dp(12), dp(16), dp(28));
+        page.setPadding(dp(16), dp(12), dp(16), dp(110));
         scroll.addView(page, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -103,7 +103,7 @@ public class MainActivity extends Activity {
         navigation = new LinearLayout(this);
         navigation.setOrientation(LinearLayout.HORIZONTAL);
         navigation.setGravity(Gravity.CENTER);
-        navigation.setPadding(dp(12), dp(8), dp(12), dp(10));
+        navigation.setPadding(dp(12), dp(8), dp(12), dp(58));
         navigation.setBackgroundColor(Color.rgb(248, 246, 243));
 
         screen.addView(scroll, new LinearLayout.LayoutParams(
@@ -188,45 +188,21 @@ public class MainActivity extends Activity {
                 addSlabStep();
                 break;
             case 7:
-                addQuestion("What should this countertop section be called?", sectionName, true);
-                break;
-            case 8:
-                addQuestion("What is the section length in inches?", lengthIn, true);
-                break;
-            case 9:
-                addQuestion("What is the section width in inches?", widthIn, true);
-                break;
-            case 10:
-                addQuestion("How many identical sections are there?", quantity, true);
-                addHelp("Tapping Next saves this countertop section.");
-                break;
-            case 11:
-                addAnotherSectionStep();
-                break;
-            case 12:
-                addQuestion("What is the slide-in stove opening length?", stoveLength, true);
-                addHelp("Leave this blank if there is no slide-in stove opening.");
-                break;
-            case 13:
-                addQuestion("What is the slide-in stove opening width?", stoveWidth, true);
-                addHelp("Leave this blank if there is no slide-in stove opening.");
-                break;
-            case 14:
                 addQuestion("What is the installed price per square foot?", pricePerSqFt, true);
                 break;
-            case 15:
+            case 8:
                 addQuestion("What is the sink or cutout charge?", sinkCharge, true);
                 break;
-            case 16:
+            case 9:
                 addQuestion("What is the edge or extra labor charge?", edgeCharge, true);
                 break;
-            case 17:
+            case 10:
                 addQuestion("What is the tear-out charge?", tearOutCharge, true);
                 break;
-            case 18:
+            case 11:
                 addQuestion("Are there any other charges?", otherCharge, true);
                 break;
-            case 19:
+            case 12:
                 addPhotoStep();
                 break;
             default:
@@ -253,9 +229,7 @@ public class MainActivity extends Activity {
         page.addView(questionTitle(title));
         detach(field);
         page.addView(field);
-        Button inlineNext = primaryButton(nextButtonText());
-        inlineNext.setOnClickListener(v -> handleNext());
-        page.addView(inlineNext);
+        addInlineNavigation();
         if (focus) {
             field.requestFocus();
             field.postDelayed(() -> {
@@ -386,12 +360,34 @@ public class MainActivity extends Activity {
         navigation.addView(next, nextParams);
     }
 
+    private void addInlineNavigation() {
+        LinearLayout inline = new LinearLayout(this);
+        inline.setOrientation(LinearLayout.HORIZONTAL);
+        inline.setGravity(Gravity.CENTER);
+        inline.setPadding(0, dp(6), 0, dp(10));
+
+        Button back = secondaryButton("Back");
+        back.setEnabled(stepIndex > 0);
+        back.setOnClickListener(v -> {
+            hideKeyboard();
+            stepIndex = Math.max(0, stepIndex - 1);
+            showStep();
+        });
+        inline.addView(back, new LinearLayout.LayoutParams(0, dp(54), 1f));
+
+        Button next = primaryButton(nextButtonText());
+        next.setOnClickListener(v -> handleNext());
+        LinearLayout.LayoutParams nextParams = new LinearLayout.LayoutParams(0, dp(54), 1f);
+        nextParams.setMargins(dp(8), 0, 0, 0);
+        inline.addView(next, nextParams);
+        page.addView(inline, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+    }
+
     private String nextButtonText() {
         if (stepIndex >= TOTAL_STEPS - 1) {
             return "Send email";
-        }
-        if (stepIndex == 11) {
-            return "No, continue";
         }
         return "Next";
     }
@@ -410,17 +406,6 @@ public class MainActivity extends Activity {
                 return;
             }
             prefs.edit().putString("office_email", email).apply();
-        }
-        if (stepIndex == 8 && value(lengthIn) <= 0) {
-            Toast.makeText(this, "Enter a length greater than zero.", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        if (stepIndex == 9 && value(widthIn) <= 0) {
-            Toast.makeText(this, "Enter a width greater than zero.", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        if (stepIndex == 10 && !addCounterSection()) {
-            return;
         }
         if (stepIndex >= TOTAL_STEPS - 1) {
             sendQuoteEmail();
