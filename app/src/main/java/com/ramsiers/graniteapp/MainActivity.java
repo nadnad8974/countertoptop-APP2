@@ -331,6 +331,7 @@ public class MainActivity extends Activity {
         detach(slabList);
         page.addView(slabList);
         renderSlabs();
+        addInlineNavigation();
     }
 
     private void addAnotherSectionStep() {
@@ -353,6 +354,7 @@ public class MainActivity extends Activity {
         });
         page.addView(addAnother);
         addHelp("Tap Next below to continue without adding another section.");
+        addInlineNavigation();
     }
 
     private void addPhotoStep() {
@@ -374,6 +376,7 @@ public class MainActivity extends Activity {
         visualizer.setOnClickListener(v -> openWebPage(MSI_VISUALIZER));
         page.addView(visualizer);
         addHelp("You may skip the photo and tap Next.");
+        addInlineNavigation();
     }
 
     private void addReviewStep() {
@@ -405,6 +408,7 @@ public class MainActivity extends Activity {
         page.addView(squareFootResult);
         detach(totalResult);
         page.addView(totalResult);
+        addInlineNavigation();
 
         Button reset = secondaryButton("Start a new customer");
         reset.setOnClickListener(v -> confirmReset());
