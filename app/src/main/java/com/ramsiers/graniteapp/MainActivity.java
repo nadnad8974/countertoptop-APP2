@@ -196,7 +196,6 @@ public class MainActivity extends Activity {
             showQuestionPage(pageOrder.get(stepIndex));
         }
 
-        addNavigation();
         scroll.post(() -> scroll.smoothScrollTo(0, 0));
     }
 
