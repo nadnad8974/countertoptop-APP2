@@ -19,6 +19,8 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.RadioButton;
+import android.widget.RadioGroup;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -40,8 +42,8 @@ public class MainActivity extends Activity {
     private static final int PICK_IMAGE = 901;
     private static final String PREFS = "ramsiers_granite_app";
     private static final String MSI_VISUALIZER = "https://www.roomvo.com/my/msi/?product_type=1&multi_product_visualizer=5";
-    private static final String DEFAULT_PAGE_ORDER = "0,1,2,3,4,5,6,7,8,9,10,11,12";
-    private static final String ALL_BUILT_IN_PAGES = "0,1,2,3,4,5,6,7,8,9,10,11,12,100,101,102,103,104,105,106";
+    private static final String DEFAULT_PAGE_ORDER = "0,1,2,3,4,5,6,7,8,13,14,15,16,17,18,9,10,11,12";
+    private static final String ALL_BUILT_IN_PAGES = "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,100,101,102,103,104,105,106";
     private static final int CUSTOM_PAGE_START = 1000;
     private static final int PAGE_NAME = 0;
     private static final int PAGE_PHONE = 1;
@@ -56,6 +58,12 @@ public class MainActivity extends Activity {
     private static final int PAGE_TEAR_OUT = 10;
     private static final int PAGE_OTHER_CHARGE = 11;
     private static final int PAGE_PHOTO = 12;
+    private static final int PAGE_COOKTOP_CUTOUT = 13;
+    private static final int PAGE_EDGE_DETAIL = 14;
+    private static final int PAGE_FAUCET = 15;
+    private static final int PAGE_BASKETS = 16;
+    private static final int PAGE_GRIDS = 17;
+    private static final int PAGE_CABINETS = 18;
     private static final int PAGE_SECTION_NAME = 100;
     private static final int PAGE_SECTION_LENGTH = 101;
     private static final int PAGE_SECTION_WIDTH = 102;
@@ -95,6 +103,18 @@ public class MainActivity extends Activity {
     private EditText edgeCharge;
     private EditText tearOutCharge;
     private EditText otherCharge;
+    private EditText cooktopCutoutQuantity;
+    private EditText edgeLinearFeet;
+    private EditText basketQuantity;
+    private EditText gridQuantity;
+    private EditText cabinetsApproximateDate;
+
+    private boolean cooktopCutoutYes;
+    private boolean faucetYes;
+    private boolean basketsYes;
+    private boolean gridsYes;
+    private boolean cabinetsInYes;
+    private String edgeDetail = "Eased and polished";
 
     private TextView squareFootResult;
     private TextView totalResult;
@@ -169,6 +189,15 @@ public class MainActivity extends Activity {
         edgeCharge = input("Enter 0 if there is no charge", decimalInput());
         tearOutCharge = input("Enter 0 if there is no charge", decimalInput());
         otherCharge = input("Enter 0 if there is no charge", decimalInput());
+        cooktopCutoutQuantity = input("How many cooktop or extra cutouts?", decimalInput());
+        cooktopCutoutQuantity.setText("0");
+        edgeLinearFeet = input("How many linear feet receive this edge?", decimalInput());
+        edgeLinearFeet.setText("0");
+        basketQuantity = input("How many baskets?", decimalInput());
+        basketQuantity.setText("0");
+        gridQuantity = input("How many big grids?", decimalInput());
+        gridQuantity.setText("0");
+        cabinetsApproximateDate = input("Approximate cabinet date", InputType.TYPE_CLASS_TEXT);
 
         squareFootResult = resultLabel("Net square footage: 0.00");
         totalResult = resultLabel("Estimated total: $0.00");
@@ -244,6 +273,24 @@ public class MainActivity extends Activity {
             case PAGE_OTHER_CHARGE:
                 addQuestion(questionText(pageId, "Are there any other charges?"), otherCharge, true);
                 break;
+            case PAGE_COOKTOP_CUTOUT:
+                addCooktopCutoutStep();
+                break;
+            case PAGE_EDGE_DETAIL:
+                addEdgeDetailStep();
+                break;
+            case PAGE_FAUCET:
+                addFaucetStep();
+                break;
+            case PAGE_BASKETS:
+                addBasketsStep();
+                break;
+            case PAGE_GRIDS:
+                addGridsStep();
+                break;
+            case PAGE_CABINETS:
+                addCabinetsStep();
+                break;
             case PAGE_PHOTO:
                 addPhotoStep();
                 break;
@@ -280,6 +327,118 @@ public class MainActivity extends Activity {
                 }
                 break;
         }
+    }
+
+    private void addCooktopCutoutStep() {
+        hideKeyboard();
+        page.addView(questionTitle(questionForEdit(PAGE_COOKTOP_CUTOUT)));
+        addHelp("$100 for each cooktop or extra cutout.");
+        RadioGroup choices = yesNoGroup(cooktopCutoutYes);
+        choices.setOnCheckedChangeListener((group, checkedId) -> {
+            cooktopCutoutYes = checkedYes(group, checkedId);
+            if (cooktopCutoutYes && value(cooktopCutoutQuantity) <= 0) {
+                cooktopCutoutQuantity.setText("1");
+            }
+        });
+        page.addView(choices);
+        detach(cooktopCutoutQuantity);
+        page.addView(cooktopCutoutQuantity);
+        addInlineNavigation();
+    }
+
+    private void addEdgeDetailStep() {
+        hideKeyboard();
+        page.addView(questionTitle(questionForEdit(PAGE_EDGE_DETAIL)));
+        addHelp("Eased and polished is free. Every other edge is $10 per linear foot.");
+
+        RadioGroup choices = new RadioGroup(this);
+        choices.setOrientation(RadioGroup.VERTICAL);
+        String[] labels = {
+                "Eased and polished - Free",
+                "Small round - $10 per linear foot",
+                "Big round - $10 per linear foot",
+                "Bevel - $10 per linear foot",
+                "Big bevel - $10 per linear foot"
+        };
+        String[] values = {
+                "Eased and polished",
+                "Small round",
+                "Big round",
+                "Bevel",
+                "Big bevel"
+        };
+        for (int i = 0; i < labels.length; i++) {
+            RadioButton choice = radioButton(labels[i], values[i]);
+            choice.setChecked(values[i].equals(edgeDetail));
+            choices.addView(choice);
+        }
+        choices.setOnCheckedChangeListener((group, checkedId) -> {
+            View selected = group.findViewById(checkedId);
+            if (selected != null && selected.getTag() instanceof String) {
+                edgeDetail = (String) selected.getTag();
+            }
+        });
+        page.addView(choices);
+        detach(edgeLinearFeet);
+        page.addView(edgeLinearFeet);
+        addInlineNavigation();
+    }
+
+    private void addFaucetStep() {
+        hideKeyboard();
+        page.addView(questionTitle(questionForEdit(PAGE_FAUCET)));
+        addHelp("RAMSIER'S faucet: $225.");
+        RadioGroup choices = yesNoGroup(faucetYes);
+        choices.setOnCheckedChangeListener((group, checkedId) ->
+                faucetYes = checkedYes(group, checkedId));
+        page.addView(choices);
+        addInlineNavigation();
+    }
+
+    private void addBasketsStep() {
+        hideKeyboard();
+        page.addView(questionTitle(questionForEdit(PAGE_BASKETS)));
+        addHelp("Baskets are $35 each.");
+        RadioGroup choices = yesNoGroup(basketsYes);
+        choices.setOnCheckedChangeListener((group, checkedId) -> {
+            basketsYes = checkedYes(group, checkedId);
+            if (basketsYes && value(basketQuantity) <= 0) {
+                basketQuantity.setText("1");
+            }
+        });
+        page.addView(choices);
+        detach(basketQuantity);
+        page.addView(basketQuantity);
+        addInlineNavigation();
+    }
+
+    private void addGridsStep() {
+        hideKeyboard();
+        page.addView(questionTitle(questionForEdit(PAGE_GRIDS)));
+        addHelp("Big grids are $70 each.");
+        RadioGroup choices = yesNoGroup(gridsYes);
+        choices.setOnCheckedChangeListener((group, checkedId) -> {
+            gridsYes = checkedYes(group, checkedId);
+            if (gridsYes && value(gridQuantity) <= 0) {
+                gridQuantity.setText("1");
+            }
+        });
+        page.addView(choices);
+        detach(gridQuantity);
+        page.addView(gridQuantity);
+        addInlineNavigation();
+    }
+
+    private void addCabinetsStep() {
+        hideKeyboard();
+        page.addView(questionTitle(questionForEdit(PAGE_CABINETS)));
+        RadioGroup choices = yesNoGroup(cabinetsInYes);
+        choices.setOnCheckedChangeListener((group, checkedId) ->
+                cabinetsInYes = checkedYes(group, checkedId));
+        page.addView(choices);
+        detach(cabinetsApproximateDate);
+        page.addView(cabinetsApproximateDate);
+        addInlineNavigation();
     }
 
     private void addBrandHeader() {
@@ -394,6 +553,11 @@ public class MainActivity extends Activity {
         customer.setPadding(dp(12), dp(12), dp(12), dp(12));
         page.addView(customer);
 
+        TextView options = label(optionsSummary());
+        options.setBackgroundColor(Color.WHITE);
+        options.setPadding(dp(12), dp(12), dp(12), dp(12));
+        page.addView(options);
+
         page.addView(sectionHeader("Countertop sections"));
         detach(sectionList);
         page.addView(sectionList);
@@ -408,6 +572,7 @@ public class MainActivity extends Activity {
         page.addView(squareFootResult);
         detach(totalResult);
         page.addView(totalResult);
+
         addInlineNavigation();
 
         Button reset = secondaryButton("Start a new customer");
@@ -489,6 +654,34 @@ public class MainActivity extends Activity {
             return;
         }
         if (pageId == PAGE_SECTION_QUANTITY && !addCounterSection()) {
+            return;
+        }
+        if (pageId == PAGE_COOKTOP_CUTOUT
+                && cooktopCutoutYes
+                && value(cooktopCutoutQuantity) <= 0) {
+            Toast.makeText(this, "Enter how many cutouts are needed.", Toast.LENGTH_LONG).show();
+            cooktopCutoutQuantity.requestFocus();
+            showKeyboard(cooktopCutoutQuantity);
+            return;
+        }
+        if (pageId == PAGE_EDGE_DETAIL
+                && !"Eased and polished".equals(edgeDetail)
+                && value(edgeLinearFeet) <= 0) {
+            Toast.makeText(this, "Enter the edge linear feet.", Toast.LENGTH_LONG).show();
+            edgeLinearFeet.requestFocus();
+            showKeyboard(edgeLinearFeet);
+            return;
+        }
+        if (pageId == PAGE_BASKETS && basketsYes && value(basketQuantity) <= 0) {
+            Toast.makeText(this, "Enter how many baskets are needed.", Toast.LENGTH_LONG).show();
+            basketQuantity.requestFocus();
+            showKeyboard(basketQuantity);
+            return;
+        }
+        if (pageId == PAGE_GRIDS && gridsYes && value(gridQuantity) <= 0) {
+            Toast.makeText(this, "Enter how many big grids are needed.", Toast.LENGTH_LONG).show();
+            gridQuantity.requestFocus();
+            showKeyboard(gridQuantity);
             return;
         }
         if (pageId >= CUSTOM_PAGE_START) {
@@ -902,11 +1095,23 @@ public class MainActivity extends Activity {
 
         double stove = (value(stoveLength) * value(stoveWidth)) / 144.0;
         double net = Math.max(0, gross - stove);
+        double cooktopCutoutTotal = cooktopCutoutYes ? value(cooktopCutoutQuantity) * 100.0 : 0;
+        double edgeDetailTotal = "Eased and polished".equals(edgeDetail)
+                ? 0
+                : value(edgeLinearFeet) * 10.0;
+        double faucetTotal = faucetYes ? 225.0 : 0;
+        double basketTotal = basketsYes ? value(basketQuantity) * 35.0 : 0;
+        double gridTotal = gridsYes ? value(gridQuantity) * 70.0 : 0;
         double total = net * value(pricePerSqFt)
                 + value(sinkCharge)
                 + value(edgeCharge)
                 + value(tearOutCharge)
-                + value(otherCharge);
+                + value(otherCharge)
+                + cooktopCutoutTotal
+                + edgeDetailTotal
+                + faucetTotal
+                + basketTotal
+                + gridTotal;
 
         if (squareFootResult != null) squareFootResult.setText("Net square footage: " + number.format(net));
         if (totalResult != null) totalResult.setText("Estimated total: $" + number.format(total));
@@ -915,6 +1120,30 @@ public class MainActivity extends Activity {
             Toast.makeText(this, "Add at least one countertop section first.", Toast.LENGTH_LONG).show();
         }
         return new Estimate(gross, stove, net, total);
+    }
+
+    private String optionsSummary() {
+        double cutoutTotal = cooktopCutoutYes ? value(cooktopCutoutQuantity) * 100.0 : 0;
+        double edgeTotal = "Eased and polished".equals(edgeDetail) ? 0 : value(edgeLinearFeet) * 10.0;
+        double basketTotal = basketsYes ? value(basketQuantity) * 35.0 : 0;
+        double gridTotal = gridsYes ? value(gridQuantity) * 70.0 : 0;
+        return "Cooktop or extra cutouts: " + yesNo(cooktopCutoutYes)
+                + (cooktopCutoutYes ? " - " + number.format(value(cooktopCutoutQuantity))
+                + " × $100 = $" + number.format(cutoutTotal) : "")
+                + "\nEdge detail: " + edgeDetail
+                + (!"Eased and polished".equals(edgeDetail)
+                ? " - " + number.format(value(edgeLinearFeet)) + " ft × $10 = $" + number.format(edgeTotal)
+                : " - Free")
+                + "\nRAMSIER'S faucet: " + yesNo(faucetYes)
+                + (faucetYes ? " - $225.00" : "")
+                + "\nBaskets: " + yesNo(basketsYes)
+                + (basketsYes ? " - " + number.format(value(basketQuantity))
+                + " × $35 = $" + number.format(basketTotal) : "")
+                + "\nBig grids: " + yesNo(gridsYes)
+                + (gridsYes ? " - " + number.format(value(gridQuantity))
+                + " × $70 = $" + number.format(gridTotal) : "")
+                + "\nCabinets are in: " + yesNo(cabinetsInYes)
+                + "\nApproximate cabinet date: " + textOrNotProvided(cabinetsApproximateDate);
     }
 
     private void openPhotoPicker() {
@@ -984,6 +1213,8 @@ public class MainActivity extends Activity {
         body.append("Gross square feet: ").append(number.format(estimate.gross)).append("\n");
         body.append("Stove opening subtracted: ").append(number.format(estimate.stove)).append(" sq ft\n");
         body.append("Net square feet: ").append(number.format(estimate.net)).append("\n");
+        body.append("\nOPTIONS AND ACCESSORIES\n");
+        body.append(optionsSummary()).append("\n");
         body.append("Estimated total: $").append(number.format(estimate.total)).append("\n");
         body.append("This is an estimate and needs final verification by RAMSIER'S.\n\n");
         if (!customPages.isEmpty()) {
@@ -1047,6 +1278,17 @@ public class MainActivity extends Activity {
         edgeCharge.setText("");
         tearOutCharge.setText("");
         otherCharge.setText("");
+        cooktopCutoutQuantity.setText("0");
+        edgeLinearFeet.setText("0");
+        basketQuantity.setText("0");
+        gridQuantity.setText("0");
+        cabinetsApproximateDate.setText("");
+        cooktopCutoutYes = false;
+        faucetYes = false;
+        basketsYes = false;
+        gridsYes = false;
+        cabinetsInYes = false;
+        edgeDetail = "Eased and polished";
         roomPhoto.setImageDrawable(null);
         photoStatus.setText("No photo selected.");
         squareFootResult.setText("Net square footage: 0.00");
@@ -1114,6 +1356,12 @@ public class MainActivity extends Activity {
             case PAGE_TEAR_OUT: return "Tear-out charge";
             case PAGE_OTHER_CHARGE: return "Other charges";
             case PAGE_PHOTO: return "Countertop photo";
+            case PAGE_COOKTOP_CUTOUT: return "Cooktop or extra cutouts";
+            case PAGE_EDGE_DETAIL: return "Edge detail";
+            case PAGE_FAUCET: return "RAMSIER'S faucet";
+            case PAGE_BASKETS: return "Baskets";
+            case PAGE_GRIDS: return "Big grids";
+            case PAGE_CABINETS: return "Cabinet status";
             case PAGE_SECTION_NAME: return "Countertop section name";
             case PAGE_SECTION_LENGTH: return "Section length";
             case PAGE_SECTION_WIDTH: return "Section width";
@@ -1154,6 +1402,12 @@ public class MainActivity extends Activity {
             case PAGE_EDGE_CHARGE: return questionText(pageId, "What is the edge or extra labor charge?");
             case PAGE_TEAR_OUT: return questionText(pageId, "What is the tear-out charge?");
             case PAGE_OTHER_CHARGE: return questionText(pageId, "Are there any other charges?");
+            case PAGE_COOKTOP_CUTOUT: return questionText(pageId, "Is a cooktop or extra cutout needed?");
+            case PAGE_EDGE_DETAIL: return questionText(pageId, "Which edge detail would you like?");
+            case PAGE_FAUCET: return questionText(pageId, "Would you like a RAMSIER'S faucet?");
+            case PAGE_BASKETS: return questionText(pageId, "Would you like baskets?");
+            case PAGE_GRIDS: return questionText(pageId, "Would you like big grids?");
+            case PAGE_CABINETS: return questionText(pageId, "Are the cabinets in?");
             case PAGE_SECTION_NAME: return questionText(pageId, "What should this countertop section be called?");
             case PAGE_SECTION_LENGTH: return questionText(pageId, "What is the section length in inches?");
             case PAGE_SECTION_WIDTH: return questionText(pageId, "What is the section width in inches?");
@@ -1226,6 +1480,29 @@ public class MainActivity extends Activity {
         if (pageOrder.isEmpty()) {
             loadDefaultPageOrder();
         }
+        addNewPricingPagesOnce();
+    }
+
+    private void addNewPricingPagesOnce() {
+        if (prefs.getBoolean("v1_14_pricing_pages_added", false)) return;
+        int after = pageOrder.indexOf(PAGE_SINK_CHARGE);
+        int insertAt = after >= 0 ? after + 1 : pageOrder.size();
+        int[] newPages = {
+                PAGE_COOKTOP_CUTOUT,
+                PAGE_EDGE_DETAIL,
+                PAGE_FAUCET,
+                PAGE_BASKETS,
+                PAGE_GRIDS,
+                PAGE_CABINETS
+        };
+        for (int pageId : newPages) {
+            if (!pageOrder.contains(pageId)) {
+                pageOrder.add(insertAt, pageId);
+                insertAt++;
+            }
+        }
+        savePageOrder();
+        prefs.edit().putBoolean("v1_14_pricing_pages_added", true).apply();
     }
 
     private void loadDefaultPageOrder() {
@@ -1299,6 +1576,12 @@ public class MainActivity extends Activity {
                 || pageId == PAGE_TEAR_OUT
                 || pageId == PAGE_OTHER_CHARGE
                 || pageId == PAGE_PHOTO
+                || pageId == PAGE_COOKTOP_CUTOUT
+                || pageId == PAGE_EDGE_DETAIL
+                || pageId == PAGE_FAUCET
+                || pageId == PAGE_BASKETS
+                || pageId == PAGE_GRIDS
+                || pageId == PAGE_CABINETS
                 || pageId == PAGE_SECTION_NAME
                 || pageId == PAGE_SECTION_LENGTH
                 || pageId == PAGE_SECTION_WIDTH
@@ -1369,6 +1652,47 @@ public class MainActivity extends Activity {
         } catch (Exception ignored) {
             return 0;
         }
+    }
+
+    private String textOrNotProvided(EditText editText) {
+        String result = editText.getText().toString().trim();
+        return result.isEmpty() ? "Not provided" : result;
+    }
+
+    private String yesNo(boolean selected) {
+        return selected ? "Yes" : "No";
+    }
+
+    private RadioGroup yesNoGroup(boolean yesSelected) {
+        RadioGroup group = new RadioGroup(this);
+        group.setOrientation(RadioGroup.HORIZONTAL);
+        group.setGravity(Gravity.CENTER);
+
+        RadioButton yes = radioButton("Yes", Boolean.TRUE);
+        RadioButton no = radioButton("No", Boolean.FALSE);
+        group.addView(yes, new RadioGroup.LayoutParams(0, dp(52), 1f));
+        group.addView(no, new RadioGroup.LayoutParams(0, dp(52), 1f));
+        if (yesSelected) {
+            yes.setChecked(true);
+        } else {
+            no.setChecked(true);
+        }
+        return group;
+    }
+
+    private RadioButton radioButton(String text, Object value) {
+        RadioButton button = new RadioButton(this);
+        button.setId(View.generateViewId());
+        button.setText(text);
+        button.setTextSize(17);
+        button.setTag(value);
+        button.setPadding(dp(8), dp(4), dp(8), dp(4));
+        return button;
+    }
+
+    private boolean checkedYes(RadioGroup group, int checkedId) {
+        View selected = group.findViewById(checkedId);
+        return selected != null && Boolean.TRUE.equals(selected.getTag());
     }
 
     private int decimalInput() {
