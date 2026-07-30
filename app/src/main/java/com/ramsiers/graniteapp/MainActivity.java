@@ -366,6 +366,7 @@ public class MainActivity extends Activity {
         Button photoButton = primaryButton("Choose kitchen or countertop photo");
         photoButton.setOnClickListener(v -> openPhotoPicker());
         page.addView(photoButton);
+        addInlineNavigation();
 
         detach(photoStatus);
         page.addView(photoStatus);
@@ -376,7 +377,6 @@ public class MainActivity extends Activity {
         visualizer.setOnClickListener(v -> openWebPage(MSI_VISUALIZER));
         page.addView(visualizer);
         addHelp("You may skip the photo and tap Next.");
-        addInlineNavigation();
     }
 
     private void addReviewStep() {
