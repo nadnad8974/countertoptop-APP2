@@ -6,8 +6,8 @@ build_path = Path("app/build.gradle")
 changed = False
 
 build = build_path.read_text()
-new_build = re.sub(r"versionCode\s+\d+", "versionCode 13", build)
-new_build = re.sub(r"versionName\s+'[^']+'", "versionName '1.12-test'", new_build)
+new_build = re.sub(r"versionCode\s+\d+", "versionCode 14", build)
+new_build = re.sub(r"versionName\s+'[^']+'", "versionName '1.13-test'", new_build)
 if new_build != build:
     build_path.write_text(new_build)
     changed = True
@@ -101,8 +101,34 @@ add_navigation_once("addAnotherSectionStep", "        addHelp(\"Tap Next below t
 add_navigation_once("addPhotoStep", "        addHelp(\"You may skip the photo and tap Next.\");")
 add_navigation_once("addReviewStep", "        page.addView(totalResult);")
 
+photo_pattern = (
+    r"(    private void addPhotoStep\(\) \{\n)"
+    r"(.*?)"
+    r"(\n    \}\n\n    private void addReviewStep)"
+)
+photo_match = re.search(photo_pattern, main, flags=re.S)
+if photo_match:
+    photo_body = photo_match.group(2)
+    photo_body_without_navigation = photo_body.replace(
+        "\n        addInlineNavigation();", "", 1
+    )
+    photo_button_anchor = "        page.addView(photoButton);"
+    if photo_button_anchor in photo_body_without_navigation:
+        photo_body = photo_body_without_navigation.replace(
+            photo_button_anchor,
+            photo_button_anchor + "\n        addInlineNavigation();",
+            1,
+        )
+        if photo_body != photo_match.group(2):
+            main = (
+                main[:photo_match.start(2)]
+                + photo_body
+                + main[photo_match.end(2):]
+            )
+            changed = True
+
 if changed:
     main_path.write_text(main)
-    print("Applied v1.12 Roomvo MSI visualizer link.")
+    print("Applied v1.13 visible photo-page navigation.")
 else:
-    print("v1.12 Roomvo MSI visualizer link already applied.")
+    print("v1.13 visible photo-page navigation already applied.")
