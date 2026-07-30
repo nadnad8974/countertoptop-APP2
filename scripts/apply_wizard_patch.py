@@ -6,13 +6,25 @@ build_path = Path("app/build.gradle")
 changed = False
 
 build = build_path.read_text()
-new_build = re.sub(r"versionCode\s+\d+", "versionCode 12", build)
-new_build = re.sub(r"versionName\s+'[^']+'", "versionName '1.11-test'", new_build)
+new_build = re.sub(r"versionCode\s+\d+", "versionCode 13", build)
+new_build = re.sub(r"versionName\s+'[^']+'", "versionName '1.12-test'", new_build)
 if new_build != build:
     build_path.write_text(new_build)
     changed = True
 
 main = main_path.read_text()
+new_visualizer = (
+    'private static final String MSI_VISUALIZER = '
+    '"https://www.roomvo.com/my/msi/?product_type=1&multi_product_visualizer=5";'
+)
+updated_main = re.sub(
+    r'private static final String MSI_VISUALIZER = "[^"]+";',
+    new_visualizer,
+    main,
+)
+if updated_main != main:
+    main = updated_main
+    changed = True
 replacements = {
     "    private void showManagePagesScreen() {\n        hideKeyboard();":
     "    private void showManagePagesScreen() {\n        showManagePagesScreen(-1);\n    }\n\n"
@@ -91,6 +103,6 @@ add_navigation_once("addReviewStep", "        page.addView(totalResult);")
 
 if changed:
     main_path.write_text(main)
-    print("Applied v1.11 navigation on special wizard pages.")
+    print("Applied v1.12 Roomvo MSI visualizer link.")
 else:
-    print("v1.11 navigation on special wizard pages already applied.")
+    print("v1.12 Roomvo MSI visualizer link already applied.")
