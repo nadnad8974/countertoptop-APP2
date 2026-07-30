@@ -762,44 +762,116 @@ public class MainActivity extends Activity {
 
         Button save = primaryButton("Save and preview");
         save.setOnClickListener(v -> {
-            if (value(cutoutPrice) < 0
-                    || value(edgePrice) < 0
-                    || value(faucetPrice) < 0
-                    || value(basketPrice) < 0
-                    || value(gridPrice) < 0) {
-                Toast.makeText(this, "Prices cannot be negative.", Toast.LENGTH_LONG).show();
-                return;
-            }
-            if (isBlank(easedName)
-                    || isBlank(smallRoundName)
-                    || isBlank(bigRoundName)
-                    || isBlank(bevelName)
-                    || isBlank(bigBevelName)) {
-                Toast.makeText(this, "Enter a name for every edge choice.", Toast.LENGTH_LONG).show();
-                return;
-            }
-            prefs.edit()
-                    .putString(PRICE_CUTOUT, cutoutPrice.getText().toString().trim())
-                    .putString(PRICE_EDGE, edgePrice.getText().toString().trim())
-                    .putString(PRICE_FAUCET, faucetPrice.getText().toString().trim())
-                    .putString(PRICE_BASKET, basketPrice.getText().toString().trim())
-                    .putString(PRICE_GRID, gridPrice.getText().toString().trim())
-                    .putString("edge_name_eased", easedName.getText().toString().trim())
-                    .putString("edge_name_small_round", smallRoundName.getText().toString().trim())
-                    .putString("edge_name_big_round", bigRoundName.getText().toString().trim())
-                    .putString("edge_name_bevel", bevelName.getText().toString().trim())
-                    .putString("edge_name_big_bevel", bigBevelName.getText().toString().trim())
-                    .apply();
+            if (!saveLiveEditorValues(
+                    cutoutPrice, edgePrice, faucetPrice, basketPrice, gridPrice,
+                    easedName, smallRoundName, bigRoundName, bevelName, bigBevelName)) return;
             hideKeyboard();
             showStep();
             Toast.makeText(this, "App changes saved.", Toast.LENGTH_SHORT).show();
         });
         page.addView(save);
 
+        Button share = secondaryButton("Send changes to ChatGPT for GitHub");
+        share.setOnClickListener(v -> {
+            if (!saveLiveEditorValues(
+                    cutoutPrice, edgePrice, faucetPrice, basketPrice, gridPrice,
+                    easedName, smallRoundName, bigRoundName, bevelName, bigBevelName)) return;
+            hideKeyboard();
+            shareLiveEditorChanges();
+        });
+        page.addView(share);
+
         Button cancel = secondaryButton("Back without saving");
         cancel.setOnClickListener(v -> showStep());
         page.addView(cancel);
         scroll.post(() -> scroll.smoothScrollTo(0, 0));
+    }
+
+    private boolean saveLiveEditorValues(
+            EditText cutoutPrice,
+            EditText edgePrice,
+            EditText faucetPrice,
+            EditText basketPrice,
+            EditText gridPrice,
+            EditText easedName,
+            EditText smallRoundName,
+            EditText bigRoundName,
+            EditText bevelName,
+            EditText bigBevelName) {
+        if (value(cutoutPrice) < 0
+                || value(edgePrice) < 0
+                || value(faucetPrice) < 0
+                || value(basketPrice) < 0
+                || value(gridPrice) < 0) {
+            Toast.makeText(this, "Prices cannot be negative.", Toast.LENGTH_LONG).show();
+            return false;
+        }
+        if (isBlank(easedName)
+                || isBlank(smallRoundName)
+                || isBlank(bigRoundName)
+                || isBlank(bevelName)
+                || isBlank(bigBevelName)) {
+            Toast.makeText(this, "Enter a name for every edge choice.", Toast.LENGTH_LONG).show();
+            return false;
+        }
+        prefs.edit()
+                .putString(PRICE_CUTOUT, cutoutPrice.getText().toString().trim())
+                .putString(PRICE_EDGE, edgePrice.getText().toString().trim())
+                .putString(PRICE_FAUCET, faucetPrice.getText().toString().trim())
+                .putString(PRICE_BASKET, basketPrice.getText().toString().trim())
+                .putString(PRICE_GRID, gridPrice.getText().toString().trim())
+                .putString("edge_name_eased", easedName.getText().toString().trim())
+                .putString("edge_name_small_round", smallRoundName.getText().toString().trim())
+                .putString("edge_name_big_round", bigRoundName.getText().toString().trim())
+                .putString("edge_name_bevel", bevelName.getText().toString().trim())
+                .putString("edge_name_big_bevel", bigBevelName.getText().toString().trim())
+                .apply();
+        return true;
+    }
+
+    private void shareLiveEditorChanges() {
+        StringBuilder settings = new StringBuilder();
+        settings.append("Please save these RAMSIER'S app settings to GitHub repo ")
+                .append("nadnad8974/countertoptop-APP2, build the next APK, ")
+                .append("and upload it to my Google Drive.\n\n");
+        settings.append("PRICES\n");
+        settings.append("Cooktop or extra cutout each: ")
+                .append(money(priceValue(PRICE_CUTOUT, 100))).append("\n");
+        settings.append("Paid edge per linear foot: ")
+                .append(money(priceValue(PRICE_EDGE, 10))).append("\n");
+        settings.append("RAMSIER'S faucet: ")
+                .append(money(priceValue(PRICE_FAUCET, 225))).append("\n");
+        settings.append("Basket each: ")
+                .append(money(priceValue(PRICE_BASKET, 35))).append("\n");
+        settings.append("Big grid each: ")
+                .append(money(priceValue(PRICE_GRID, 70))).append("\n\n");
+
+        settings.append("EDGE CHOICE NAMES\n");
+        settings.append("Free: ").append(edgeName("eased", "Eased and polished")).append("\n");
+        settings.append("Small round: ").append(edgeName("small_round", "Small round")).append("\n");
+        settings.append("Big round: ").append(edgeName("big_round", "Big round")).append("\n");
+        settings.append("Bevel: ").append(edgeName("bevel", "Bevel")).append("\n");
+        settings.append("Big bevel: ").append(edgeName("big_bevel", "Big bevel")).append("\n\n");
+
+        settings.append("PAGE ORDER AND WORDING\n");
+        for (int i = 0; i < pageOrder.size(); i++) {
+            int pageId = pageOrder.get(i);
+            settings.append(i + 1).append(". ")
+                    .append(pageDisplayTitle(pageId))
+                    .append(" | ")
+                    .append(questionForEdit(pageId))
+                    .append("\n");
+        }
+
+        Intent share = new Intent(Intent.ACTION_SEND);
+        share.setType("text/plain");
+        share.putExtra(Intent.EXTRA_SUBJECT, "RAMSIER'S app settings for GitHub");
+        share.putExtra(Intent.EXTRA_TEXT, settings.toString());
+        try {
+            startActivity(Intent.createChooser(share, "Choose ChatGPT, then tap Send"));
+        } catch (Exception e) {
+            Toast.makeText(this, "A sharing app could not be opened.", Toast.LENGTH_LONG).show();
+        }
     }
 
     private void showManagePagesScreen() {
