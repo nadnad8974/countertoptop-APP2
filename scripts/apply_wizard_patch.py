@@ -6,8 +6,8 @@ build_path = Path("app/build.gradle")
 changed = False
 
 build = build_path.read_text()
-new_build = re.sub(r"versionCode\s+\d+", "versionCode 6", build)
-new_build = re.sub(r"versionName\s+'[^']+'", "versionName '1.5-test'", new_build)
+new_build = re.sub(r"versionCode\s+\d+", "versionCode 7", build)
+new_build = re.sub(r"versionName\s+'[^']+'", "versionName '1.6-test'", new_build)
 if new_build != build:
     build_path.write_text(new_build)
     changed = True
@@ -84,8 +84,7 @@ new_flow = '''        Button movePages = secondaryButton("Move pages");
         } else {
             showQuestionPage(pageOrder.get(stepIndex));
         }
-
-        addNavigation();'''
+'''
 main2 = switch_pattern.sub(new_flow, main, count=1)
 if main2 != main:
     main = main2
@@ -208,6 +207,7 @@ if "private void addInlineNavigation()" not in main:
     changed = True
 
 main = main.replace("if (stepIndex >= TOTAL_STEPS - 1)", "if (stepIndex >= pageOrder.size())")
+main = main.replace("\n        addNavigation();\n        scroll.post(() -> scroll.smoothScrollTo(0, 0));", "\n        scroll.post(() -> scroll.smoothScrollTo(0, 0));")
 main = main.replace('''        if (stepIndex == 11) {
             return "No, continue";
         }
@@ -424,6 +424,6 @@ if "private String pageTitle(int pageId)" not in main:
 
 if changed:
     main_path.write_text(main)
-    print("Applied v1.5 movable page order.")
+    print("Applied v1.6 inline-only question navigation.")
 else:
-    print("v1.5 movable page order already applied.")
+    print("v1.6 inline-only question navigation already applied.")
