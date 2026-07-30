@@ -1074,7 +1074,7 @@ public class MainActivity extends Activity {
         }
         String query = slab.name == null || slab.name.trim().isEmpty() ? slab.raw : slab.name;
         if (query == null || query.trim().isEmpty()) query = "quartz";
-        return "https://www.msisurfaces.com/search/?search=" + Uri.encode(cleanMsiSearch(query));
+        return "https://www.msisurfaces.com/site-search/?key=" + Uri.encode(cleanMsiSearch(query)) + "&ctgy=slab";
     }
 
     private String cleanMsiSearch(String value) {
