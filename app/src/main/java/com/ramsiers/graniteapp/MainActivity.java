@@ -760,7 +760,7 @@ public class MainActivity extends Activity {
                 "Big bevel choice",
                 edgeName("big_bevel", "Big bevel"));
 
-        Button save = primaryButton("Save and preview");
+        Button save = primaryButton("Save");
         save.setOnClickListener(v -> {
             if (!saveLiveEditorValues(
                     cutoutPrice, edgePrice, faucetPrice, basketPrice, gridPrice,
@@ -769,9 +769,8 @@ public class MainActivity extends Activity {
             showStep();
             Toast.makeText(this, "App changes saved.", Toast.LENGTH_SHORT).show();
         });
-        page.addView(save);
 
-        Button share = secondaryButton("Send changes to ChatGPT for GitHub");
+        Button share = secondaryButton("Send");
         share.setOnClickListener(v -> {
             if (!saveLiveEditorValues(
                     cutoutPrice, edgePrice, faucetPrice, basketPrice, gridPrice,
@@ -779,11 +778,18 @@ public class MainActivity extends Activity {
             hideKeyboard();
             shareLiveEditorChanges();
         });
-        page.addView(share);
 
-        Button cancel = secondaryButton("Back without saving");
-        cancel.setOnClickListener(v -> showStep());
-        page.addView(cancel);
+        Button back = secondaryButton("Back");
+        back.setOnClickListener(v -> showStep());
+        navigation.addView(back, new LinearLayout.LayoutParams(0, dp(54), 1f));
+
+        LinearLayout.LayoutParams saveParams = new LinearLayout.LayoutParams(0, dp(54), 1f);
+        saveParams.setMargins(dp(6), 0, 0, 0);
+        navigation.addView(save, saveParams);
+
+        LinearLayout.LayoutParams shareParams = new LinearLayout.LayoutParams(0, dp(54), 1f);
+        shareParams.setMargins(dp(6), 0, 0, 0);
+        navigation.addView(share, shareParams);
         scroll.post(() -> scroll.smoothScrollTo(0, 0));
     }
 
