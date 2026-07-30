@@ -515,6 +515,10 @@ public class MainActivity extends Activity {
     }
 
     private void showManagePagesScreen() {
+        showManagePagesScreen(-1);
+    }
+
+    private void showManagePagesScreen(int keepIndexVisible) {
         hideKeyboard();
         page.removeAllViews();
         navigation.removeAllViews();
@@ -530,10 +534,14 @@ public class MainActivity extends Activity {
         restorePage.setOnClickListener(v -> showAddPageDialog());
         page.addView(restorePage);
 
+        final View[] keepVisibleRow = new View[1];
         for (int i = 0; i < pageOrder.size(); i++) {
             final int index = i;
             final int pageId = pageOrder.get(i);
             LinearLayout row = itemRow();
+            if (index == keepIndexVisible) {
+                keepVisibleRow[0] = row;
+            }
             row.setOrientation(LinearLayout.VERTICAL);
             TextView text = label((i + 1) + ". " + pageDisplayTitle(pageId));
             text.setTypeface(Typeface.DEFAULT_BOLD);
@@ -575,7 +583,13 @@ public class MainActivity extends Activity {
             showManagePagesScreen();
         });
         page.addView(reset);
-        scroll.post(() -> scroll.smoothScrollTo(0, 0));
+        scroll.post(() -> {
+            if (keepVisibleRow[0] != null) {
+                scroll.scrollTo(0, Math.max(0, keepVisibleRow[0].getTop() - dp(20)));
+            } else {
+                scroll.smoothScrollTo(0, 0);
+            }
+        });
     }
 
     private void movePage(int from, int to) {
@@ -590,7 +604,7 @@ public class MainActivity extends Activity {
         } else if (from > stepIndex && to <= stepIndex) {
             stepIndex += 1;
         }
-        showManagePagesScreen();
+        showManagePagesScreen(to);
     }
 
     private void removePage(int index) {
