@@ -8,6 +8,7 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.text.InputType;
@@ -120,6 +121,7 @@ public class MainActivity extends Activity {
     private boolean gridsYes;
     private boolean cabinetsInYes;
     private String edgeDetail = "Eased and polished";
+    private String sinkSelection = "Not selected";
 
     private TextView squareFootResult;
     private TextView totalResult;
@@ -267,7 +269,7 @@ public class MainActivity extends Activity {
                 addQuestion(questionText(pageId, "What is the installed price per square foot?"), pricePerSqFt, true);
                 break;
             case PAGE_SINK_CHARGE:
-                addQuestion(questionText(pageId, "What is the sink or cutout charge?"), sinkCharge, true);
+                addSinkSelectionStep();
                 break;
             case PAGE_EDGE_CHARGE:
                 addQuestion(questionText(pageId, "What is the edge or extra labor charge?"), edgeCharge, true);
@@ -351,6 +353,51 @@ public class MainActivity extends Activity {
         addInlineNavigation();
     }
 
+    private void addSinkSelectionStep() {
+        hideKeyboard();
+        page.addView(questionTitle(questionForEdit(PAGE_SINK_CHARGE)));
+        addHelp("Tap the sink the customer wants. Enter a sink or cutout charge below if needed.");
+
+        RadioGroup choices = new RadioGroup(this);
+        choices.setOrientation(RadioGroup.VERTICAL);
+        addImageChoice(choices, "Equal double-bowl sink", R.drawable.sink_equal_double);
+        addImageChoice(choices, "Offset double-bowl sink", R.drawable.sink_offset_double);
+        addImageChoice(choices, "Single-bowl sink", R.drawable.sink_single_bowl);
+
+        RadioButton noSelection = radioButton("No sink selected", "Not selected");
+        noSelection.setChecked("Not selected".equals(sinkSelection));
+        choices.addView(noSelection);
+        choices.setOnCheckedChangeListener((group, checkedId) -> {
+            View selected = group.findViewById(checkedId);
+            if (selected != null && selected.getTag() instanceof String) {
+                sinkSelection = (String) selected.getTag();
+            }
+        });
+        page.addView(choices);
+
+        detach(sinkCharge);
+        page.addView(sinkCharge);
+        addInlineNavigation();
+    }
+
+    private void addImageChoice(RadioGroup group, String label, int imageResource) {
+        RadioButton choice = radioButton(label, label);
+        choice.setGravity(Gravity.CENTER);
+        choice.setTextSize(17);
+        choice.setPadding(dp(8), dp(12), dp(8), dp(16));
+
+        Drawable image = getResources().getDrawable(imageResource);
+        int imageWidth = dp(300);
+        int imageHeight = dp(185);
+        image.setBounds(0, 0, imageWidth, imageHeight);
+        choice.setCompoundDrawables(null, image, null, null);
+        choice.setCompoundDrawablePadding(dp(8));
+        choice.setChecked(label.equals(sinkSelection));
+        group.addView(choice, new RadioGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+    }
+
     private void addEdgeDetailStep() {
         hideKeyboard();
         page.addView(questionTitle(questionForEdit(PAGE_EDGE_DETAIL)));
@@ -401,7 +448,8 @@ public class MainActivity extends Activity {
     private void addBasketsStep() {
         hideKeyboard();
         page.addView(questionTitle(questionForEdit(PAGE_BASKETS)));
-        addHelp("Baskets are " + money(priceValue(PRICE_BASKET, 35)) + " each.");
+        addProductImage(R.drawable.basket_drain, "Basket drain");
+        addHelp("Basket drains are " + money(priceValue(PRICE_BASKET, 35)) + " each.");
         RadioGroup choices = yesNoGroup(basketsYes);
         choices.setOnCheckedChangeListener((group, checkedId) -> {
             basketsYes = checkedYes(group, checkedId);
@@ -418,6 +466,7 @@ public class MainActivity extends Activity {
     private void addGridsStep() {
         hideKeyboard();
         page.addView(questionTitle(questionForEdit(PAGE_GRIDS)));
+        addProductImage(R.drawable.sink_grid, "Big sink grid");
         addHelp("Big grids are " + money(priceValue(PRICE_GRID, 70)) + " each.");
         RadioGroup choices = yesNoGroup(gridsYes);
         choices.setOnCheckedChangeListener((group, checkedId) -> {
@@ -430,6 +479,21 @@ public class MainActivity extends Activity {
         detach(gridQuantity);
         page.addView(gridQuantity);
         addInlineNavigation();
+    }
+
+    private void addProductImage(int imageResource, String description) {
+        ImageView image = new ImageView(this);
+        image.setImageResource(imageResource);
+        image.setContentDescription(description);
+        image.setAdjustViewBounds(true);
+        image.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        image.setBackgroundColor(Color.WHITE);
+        image.setPadding(dp(8), dp(8), dp(8), dp(8));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(220));
+        params.setMargins(0, dp(6), 0, dp(10));
+        page.addView(image, params);
     }
 
     private void addCabinetsStep() {
@@ -1314,9 +1378,10 @@ public class MainActivity extends Activity {
                 ? " - " + number.format(value(edgeLinearFeet)) + " ft × "
                 + money(edgePrice) + " = " + money(edgeTotal)
                 : " - Free")
+                + "\nSink selection: " + sinkSelection
                 + "\nRAMSIER'S faucet: " + yesNo(faucetYes)
                 + (faucetYes ? " - " + money(faucetPrice) : "")
-                + "\nBaskets: " + yesNo(basketsYes)
+                + "\nBasket drains: " + yesNo(basketsYes)
                 + (basketsYes ? " - " + number.format(value(basketQuantity))
                 + " × " + money(basketPrice) + " = " + money(basketTotal) : "")
                 + "\nBig grids: " + yesNo(gridsYes)
@@ -1469,6 +1534,7 @@ public class MainActivity extends Activity {
         gridsYes = false;
         cabinetsInYes = false;
         edgeDetail = "Eased and polished";
+        sinkSelection = "Not selected";
         roomPhoto.setImageDrawable(null);
         photoStatus.setText("No photo selected.");
         squareFootResult.setText("Net square footage: 0.00");
@@ -1531,7 +1597,7 @@ public class MainActivity extends Activity {
             case PAGE_OFFICE_EMAIL: return "RAMSIER'S office email";
             case PAGE_SLABS: return "Slab choices";
             case PAGE_PRICE: return "Installed price";
-            case PAGE_SINK_CHARGE: return "Sink or cutout charge";
+            case PAGE_SINK_CHARGE: return "Sink selection";
             case PAGE_EDGE_CHARGE: return "Edge or extra labor charge";
             case PAGE_TEAR_OUT: return "Tear-out charge";
             case PAGE_OTHER_CHARGE: return "Other charges";
@@ -1539,7 +1605,7 @@ public class MainActivity extends Activity {
             case PAGE_COOKTOP_CUTOUT: return "Cooktop or extra cutouts";
             case PAGE_EDGE_DETAIL: return "Edge detail";
             case PAGE_FAUCET: return "RAMSIER'S faucet";
-            case PAGE_BASKETS: return "Baskets";
+            case PAGE_BASKETS: return "Basket drains";
             case PAGE_GRIDS: return "Big grids";
             case PAGE_CABINETS: return "Cabinet status";
             case PAGE_SECTION_NAME: return "Countertop section name";
@@ -1578,14 +1644,14 @@ public class MainActivity extends Activity {
             case PAGE_NOTES: return questionText(pageId, "Are there any project notes?");
             case PAGE_OFFICE_EMAIL: return questionText(pageId, "What email should receive the quote request?");
             case PAGE_PRICE: return questionText(pageId, "What is the installed price per square foot?");
-            case PAGE_SINK_CHARGE: return questionText(pageId, "What is the sink or cutout charge?");
+            case PAGE_SINK_CHARGE: return questionText(pageId, "Which sink would you like?");
             case PAGE_EDGE_CHARGE: return questionText(pageId, "What is the edge or extra labor charge?");
             case PAGE_TEAR_OUT: return questionText(pageId, "What is the tear-out charge?");
             case PAGE_OTHER_CHARGE: return questionText(pageId, "Are there any other charges?");
             case PAGE_COOKTOP_CUTOUT: return questionText(pageId, "Is a cooktop or extra cutout needed?");
             case PAGE_EDGE_DETAIL: return questionText(pageId, "Which edge detail would you like?");
             case PAGE_FAUCET: return questionText(pageId, "Would you like a RAMSIER'S faucet?");
-            case PAGE_BASKETS: return questionText(pageId, "Would you like baskets?");
+            case PAGE_BASKETS: return questionText(pageId, "Would you like basket drains?");
             case PAGE_GRIDS: return questionText(pageId, "Would you like big grids?");
             case PAGE_CABINETS: return questionText(pageId, "Are the cabinets in?");
             case PAGE_SECTION_NAME: return questionText(pageId, "What should this countertop section be called?");
