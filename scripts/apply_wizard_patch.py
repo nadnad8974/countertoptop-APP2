@@ -1,134 +1,26 @@
 from pathlib import Path
-import re
+import base64
+import gzip
+import subprocess
 
 main_path = Path("app/src/main/java/com/ramsiers/graniteapp/MainActivity.java")
 build_path = Path("app/build.gradle")
-changed = False
+marker = "private static final int PAGE_COOKTOP_CUTOUT = 13;"
+version = "versionName '1.14-test'"
 
-build = build_path.read_text()
-new_build = re.sub(r"versionCode\s+\d+", "versionCode 14", build)
-new_build = re.sub(r"versionName\s+'[^']+'", "versionName '1.13-test'", new_build)
-if new_build != build:
-    build_path.write_text(new_build)
-    changed = True
+patch_gzip_base64 = "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"
 
 main = main_path.read_text()
-new_visualizer = (
-    'private static final String MSI_VISUALIZER = '
-    '"https://www.roomvo.com/my/msi/?product_type=1&multi_product_visualizer=5";'
-)
-updated_main = re.sub(
-    r'private static final String MSI_VISUALIZER = "[^"]+";',
-    new_visualizer,
-    main,
-)
-if updated_main != main:
-    main = updated_main
-    changed = True
-replacements = {
-    "    private void showManagePagesScreen() {\n        hideKeyboard();":
-    "    private void showManagePagesScreen() {\n        showManagePagesScreen(-1);\n    }\n\n"
-    "    private void showManagePagesScreen(int keepIndexVisible) {\n        hideKeyboard();",
-    "        showManagePagesScreen();\n    }\n\n    private void removePage":
-    "        showManagePagesScreen(to);\n    }\n\n    private void removePage",
-}
-
-for old, new in replacements.items():
-    if old in main:
-        main = main.replace(old, new, 1)
-        changed = True
-
-old_row_loop = (
-    "        for (int i = 0; i < pageOrder.size(); i++) {\n"
-    "            final int index = i;\n"
-    "            final int pageId = pageOrder.get(i);\n"
-    "            LinearLayout row = itemRow();"
-)
-new_row_loop = (
-    "        final View[] keepVisibleRow = new View[1];\n"
-    "        for (int i = 0; i < pageOrder.size(); i++) {\n"
-    "            final int index = i;\n"
-    "            final int pageId = pageOrder.get(i);\n"
-    "            LinearLayout row = itemRow();\n"
-    "            if (index == keepIndexVisible) {\n"
-    "                keepVisibleRow[0] = row;\n"
-    "            }"
-)
-if "final View[] keepVisibleRow = new View[1];" not in main and old_row_loop in main:
-    main = main.replace(old_row_loop, new_row_loop, 1)
-    changed = True
-
-old_scroll = (
-    "        page.addView(reset);\n"
-    "        scroll.post(() -> scroll.smoothScrollTo(0, 0));\n"
-    "    }\n\n"
-    "    private void movePage"
-)
-new_scroll = (
-    "        page.addView(reset);\n"
-    "        scroll.post(() -> {\n"
-    "            if (keepVisibleRow[0] != null) {\n"
-    "                scroll.scrollTo(0, Math.max(0, keepVisibleRow[0].getTop() - dp(20)));\n"
-    "            } else {\n"
-    "                scroll.smoothScrollTo(0, 0);\n"
-    "            }\n"
-    "        });\n"
-    "    }\n\n"
-    "    private void movePage"
-)
-if old_scroll in main:
-    main = main.replace(old_scroll, new_scroll, 1)
-    changed = True
-
-def add_navigation_once(method_name, anchor):
-    global main, changed
-    pattern = (
-        r"(    private void " + re.escape(method_name) +
-        r"\(\) \{\n)(.*?)(\n    \}\n\n    private void )"
-    )
-    match = re.search(pattern, main, flags=re.S)
-    if not match or "addInlineNavigation();" in match.group(2):
-        return
-    body = match.group(2)
-    if anchor not in body:
-        return
-    body = body.replace(anchor, anchor + "\n        addInlineNavigation();", 1)
-    main = main[:match.start(2)] + body + main[match.end(2):]
-    changed = True
-
-add_navigation_once("addSlabStep", "        renderSlabs();")
-add_navigation_once("addAnotherSectionStep", "        addHelp(\"Tap Next below to continue without adding another section.\");")
-add_navigation_once("addPhotoStep", "        addHelp(\"You may skip the photo and tap Next.\");")
-add_navigation_once("addReviewStep", "        page.addView(totalResult);")
-
-photo_pattern = (
-    r"(    private void addPhotoStep\(\) \{\n)"
-    r"(.*?)"
-    r"(\n    \}\n\n    private void addReviewStep)"
-)
-photo_match = re.search(photo_pattern, main, flags=re.S)
-if photo_match:
-    photo_body = photo_match.group(2)
-    photo_body_without_navigation = photo_body.replace(
-        "\n        addInlineNavigation();", "", 1
-    )
-    photo_button_anchor = "        page.addView(photoButton);"
-    if photo_button_anchor in photo_body_without_navigation:
-        photo_body = photo_body_without_navigation.replace(
-            photo_button_anchor,
-            photo_button_anchor + "\n        addInlineNavigation();",
-            1,
-        )
-        if photo_body != photo_match.group(2):
-            main = (
-                main[:photo_match.start(2)]
-                + photo_body
-                + main[photo_match.end(2):]
-            )
-            changed = True
-
-if changed:
-    main_path.write_text(main)
-    print("Applied v1.13 visible photo-page navigation.")
+build = build_path.read_text()
+if marker in main and version in build:
+    print("v1.14 pricing pages already applied.")
 else:
-    print("v1.13 visible photo-page navigation already applied.")
+    patch = gzip.decompress(base64.b64decode(patch_gzip_base64))
+    result = subprocess.run(
+        ["git", "apply", "--whitespace=nowarn", "-"],
+        input=patch,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.decode("utf-8", errors="replace"))
+    print("Applied v1.14 pricing and cabinet question pages.")
