@@ -42,6 +42,11 @@ public class MainActivity extends Activity {
     private static final int PICK_IMAGE = 901;
     private static final String PREFS = "ramsiers_granite_app";
     private static final String MSI_VISUALIZER = "https://www.roomvo.com/my/msi/?product_type=1&multi_product_visualizer=5";
+    private static final String PRICE_CUTOUT = "price_cutout";
+    private static final String PRICE_EDGE = "price_edge";
+    private static final String PRICE_FAUCET = "price_faucet";
+    private static final String PRICE_BASKET = "price_basket";
+    private static final String PRICE_GRID = "price_grid";
     private static final String DEFAULT_PAGE_ORDER = "0,1,2,3,4,5,6,7,8,13,14,15,16,17,18,9,10,11,12";
     private static final String ALL_BUILT_IN_PAGES = "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,100,101,102,103,104,105,106";
     private static final int CUSTOM_PAGE_START = 1000;
@@ -221,9 +226,9 @@ public class MainActivity extends Activity {
         progress.setTextColor(Color.GRAY);
         page.addView(progress);
 
-        Button movePages = secondaryButton("Manage pages");
-        movePages.setOnClickListener(v -> showManagePagesScreen());
-        page.addView(movePages);
+        Button editApp = secondaryButton("Edit app");
+        editApp.setOnClickListener(v -> showLiveEditScreen());
+        page.addView(editApp);
 
         if (stepIndex >= pageOrder.size()) {
             addReviewStep();
@@ -332,7 +337,7 @@ public class MainActivity extends Activity {
     private void addCooktopCutoutStep() {
         hideKeyboard();
         page.addView(questionTitle(questionForEdit(PAGE_COOKTOP_CUTOUT)));
-        addHelp("$100 for each cooktop or extra cutout.");
+        addHelp(money(priceValue(PRICE_CUTOUT, 100)) + " for each cooktop or extra cutout.");
         RadioGroup choices = yesNoGroup(cooktopCutoutYes);
         choices.setOnCheckedChangeListener((group, checkedId) -> {
             cooktopCutoutYes = checkedYes(group, checkedId);
@@ -349,17 +354,12 @@ public class MainActivity extends Activity {
     private void addEdgeDetailStep() {
         hideKeyboard();
         page.addView(questionTitle(questionForEdit(PAGE_EDGE_DETAIL)));
-        addHelp("Eased and polished is free. Every other edge is $10 per linear foot.");
+        double edgePrice = priceValue(PRICE_EDGE, 10);
+        addHelp(edgeName("eased", "Eased and polished") + " is free. Every other edge is "
+                + money(edgePrice) + " per linear foot.");
 
         RadioGroup choices = new RadioGroup(this);
         choices.setOrientation(RadioGroup.VERTICAL);
-        String[] labels = {
-                "Eased and polished - Free",
-                "Small round - $10 per linear foot",
-                "Big round - $10 per linear foot",
-                "Bevel - $10 per linear foot",
-                "Big bevel - $10 per linear foot"
-        };
         String[] values = {
                 "Eased and polished",
                 "Small round",
@@ -367,9 +367,12 @@ public class MainActivity extends Activity {
                 "Bevel",
                 "Big bevel"
         };
-        for (int i = 0; i < labels.length; i++) {
-            RadioButton choice = radioButton(labels[i], values[i]);
-            choice.setChecked(values[i].equals(edgeDetail));
+        for (String edgeValue : values) {
+            boolean free = "Eased and polished".equals(edgeValue);
+            String label = edgeDisplayName(edgeValue)
+                    + (free ? " - Free" : " - " + money(edgePrice) + " per linear foot");
+            RadioButton choice = radioButton(label, edgeValue);
+            choice.setChecked(edgeValue.equals(edgeDetail));
             choices.addView(choice);
         }
         choices.setOnCheckedChangeListener((group, checkedId) -> {
@@ -387,7 +390,7 @@ public class MainActivity extends Activity {
     private void addFaucetStep() {
         hideKeyboard();
         page.addView(questionTitle(questionForEdit(PAGE_FAUCET)));
-        addHelp("RAMSIER'S faucet: $225.");
+        addHelp("RAMSIER'S faucet: " + money(priceValue(PRICE_FAUCET, 225)) + ".");
         RadioGroup choices = yesNoGroup(faucetYes);
         choices.setOnCheckedChangeListener((group, checkedId) ->
                 faucetYes = checkedYes(group, checkedId));
@@ -398,7 +401,7 @@ public class MainActivity extends Activity {
     private void addBasketsStep() {
         hideKeyboard();
         page.addView(questionTitle(questionForEdit(PAGE_BASKETS)));
-        addHelp("Baskets are $35 each.");
+        addHelp("Baskets are " + money(priceValue(PRICE_BASKET, 35)) + " each.");
         RadioGroup choices = yesNoGroup(basketsYes);
         choices.setOnCheckedChangeListener((group, checkedId) -> {
             basketsYes = checkedYes(group, checkedId);
@@ -415,7 +418,7 @@ public class MainActivity extends Activity {
     private void addGridsStep() {
         hideKeyboard();
         page.addView(questionTitle(questionForEdit(PAGE_GRIDS)));
-        addHelp("Big grids are $70 each.");
+        addHelp("Big grids are " + money(priceValue(PRICE_GRID, 70)) + " each.");
         RadioGroup choices = yesNoGroup(gridsYes);
         choices.setOnCheckedChangeListener((group, checkedId) -> {
             gridsYes = checkedYes(group, checkedId);
@@ -709,6 +712,94 @@ public class MainActivity extends Activity {
 
     private int totalSteps() {
         return pageOrder.size() + 1;
+    }
+
+    private void showLiveEditScreen() {
+        hideKeyboard();
+        page.removeAllViews();
+        navigation.removeAllViews();
+        addBrandHeader();
+        page.addView(questionTitle("Edit app"));
+        addHelp("Changes save on this phone and appear immediately.");
+
+        Button managePages = primaryButton("Add, remove, rename, or move pages");
+        managePages.setOnClickListener(v -> showManagePagesScreen());
+        page.addView(managePages);
+
+        page.addView(sectionHeader("Prices"));
+        EditText cutoutPrice = editorField(
+                "Cooktop or extra cutout - price each",
+                priceValue(PRICE_CUTOUT, 100));
+        EditText edgePrice = editorField(
+                "Paid edge details - price per linear foot",
+                priceValue(PRICE_EDGE, 10));
+        EditText faucetPrice = editorField(
+                "RAMSIER'S faucet price",
+                priceValue(PRICE_FAUCET, 225));
+        EditText basketPrice = editorField(
+                "Basket price each",
+                priceValue(PRICE_BASKET, 35));
+        EditText gridPrice = editorField(
+                "Big grid price each",
+                priceValue(PRICE_GRID, 70));
+
+        page.addView(sectionHeader("Edge choice names"));
+        EditText easedName = editorTextField(
+                "Free edge choice",
+                edgeName("eased", "Eased and polished"));
+        EditText smallRoundName = editorTextField(
+                "Small round choice",
+                edgeName("small_round", "Small round"));
+        EditText bigRoundName = editorTextField(
+                "Big round choice",
+                edgeName("big_round", "Big round"));
+        EditText bevelName = editorTextField(
+                "Bevel choice",
+                edgeName("bevel", "Bevel"));
+        EditText bigBevelName = editorTextField(
+                "Big bevel choice",
+                edgeName("big_bevel", "Big bevel"));
+
+        Button save = primaryButton("Save and preview");
+        save.setOnClickListener(v -> {
+            if (value(cutoutPrice) < 0
+                    || value(edgePrice) < 0
+                    || value(faucetPrice) < 0
+                    || value(basketPrice) < 0
+                    || value(gridPrice) < 0) {
+                Toast.makeText(this, "Prices cannot be negative.", Toast.LENGTH_LONG).show();
+                return;
+            }
+            if (isBlank(easedName)
+                    || isBlank(smallRoundName)
+                    || isBlank(bigRoundName)
+                    || isBlank(bevelName)
+                    || isBlank(bigBevelName)) {
+                Toast.makeText(this, "Enter a name for every edge choice.", Toast.LENGTH_LONG).show();
+                return;
+            }
+            prefs.edit()
+                    .putString(PRICE_CUTOUT, cutoutPrice.getText().toString().trim())
+                    .putString(PRICE_EDGE, edgePrice.getText().toString().trim())
+                    .putString(PRICE_FAUCET, faucetPrice.getText().toString().trim())
+                    .putString(PRICE_BASKET, basketPrice.getText().toString().trim())
+                    .putString(PRICE_GRID, gridPrice.getText().toString().trim())
+                    .putString("edge_name_eased", easedName.getText().toString().trim())
+                    .putString("edge_name_small_round", smallRoundName.getText().toString().trim())
+                    .putString("edge_name_big_round", bigRoundName.getText().toString().trim())
+                    .putString("edge_name_bevel", bevelName.getText().toString().trim())
+                    .putString("edge_name_big_bevel", bigBevelName.getText().toString().trim())
+                    .apply();
+            hideKeyboard();
+            showStep();
+            Toast.makeText(this, "App changes saved.", Toast.LENGTH_SHORT).show();
+        });
+        page.addView(save);
+
+        Button cancel = secondaryButton("Back without saving");
+        cancel.setOnClickListener(v -> showStep());
+        page.addView(cancel);
+        scroll.post(() -> scroll.smoothScrollTo(0, 0));
     }
 
     private void showManagePagesScreen() {
@@ -1095,13 +1186,18 @@ public class MainActivity extends Activity {
 
         double stove = (value(stoveLength) * value(stoveWidth)) / 144.0;
         double net = Math.max(0, gross - stove);
-        double cooktopCutoutTotal = cooktopCutoutYes ? value(cooktopCutoutQuantity) * 100.0 : 0;
+        double cooktopPrice = priceValue(PRICE_CUTOUT, 100);
+        double edgePrice = priceValue(PRICE_EDGE, 10);
+        double faucetPrice = priceValue(PRICE_FAUCET, 225);
+        double basketPrice = priceValue(PRICE_BASKET, 35);
+        double gridPrice = priceValue(PRICE_GRID, 70);
+        double cooktopCutoutTotal = cooktopCutoutYes ? value(cooktopCutoutQuantity) * cooktopPrice : 0;
         double edgeDetailTotal = "Eased and polished".equals(edgeDetail)
                 ? 0
-                : value(edgeLinearFeet) * 10.0;
-        double faucetTotal = faucetYes ? 225.0 : 0;
-        double basketTotal = basketsYes ? value(basketQuantity) * 35.0 : 0;
-        double gridTotal = gridsYes ? value(gridQuantity) * 70.0 : 0;
+                : value(edgeLinearFeet) * edgePrice;
+        double faucetTotal = faucetYes ? faucetPrice : 0;
+        double basketTotal = basketsYes ? value(basketQuantity) * basketPrice : 0;
+        double gridTotal = gridsYes ? value(gridQuantity) * gridPrice : 0;
         double total = net * value(pricePerSqFt)
                 + value(sinkCharge)
                 + value(edgeCharge)
@@ -1123,25 +1219,31 @@ public class MainActivity extends Activity {
     }
 
     private String optionsSummary() {
-        double cutoutTotal = cooktopCutoutYes ? value(cooktopCutoutQuantity) * 100.0 : 0;
-        double edgeTotal = "Eased and polished".equals(edgeDetail) ? 0 : value(edgeLinearFeet) * 10.0;
-        double basketTotal = basketsYes ? value(basketQuantity) * 35.0 : 0;
-        double gridTotal = gridsYes ? value(gridQuantity) * 70.0 : 0;
+        double cooktopPrice = priceValue(PRICE_CUTOUT, 100);
+        double edgePrice = priceValue(PRICE_EDGE, 10);
+        double faucetPrice = priceValue(PRICE_FAUCET, 225);
+        double basketPrice = priceValue(PRICE_BASKET, 35);
+        double gridPrice = priceValue(PRICE_GRID, 70);
+        double cutoutTotal = cooktopCutoutYes ? value(cooktopCutoutQuantity) * cooktopPrice : 0;
+        double edgeTotal = "Eased and polished".equals(edgeDetail) ? 0 : value(edgeLinearFeet) * edgePrice;
+        double basketTotal = basketsYes ? value(basketQuantity) * basketPrice : 0;
+        double gridTotal = gridsYes ? value(gridQuantity) * gridPrice : 0;
         return "Cooktop or extra cutouts: " + yesNo(cooktopCutoutYes)
                 + (cooktopCutoutYes ? " - " + number.format(value(cooktopCutoutQuantity))
-                + " × $100 = $" + number.format(cutoutTotal) : "")
-                + "\nEdge detail: " + edgeDetail
+                + " × " + money(cooktopPrice) + " = " + money(cutoutTotal) : "")
+                + "\nEdge detail: " + edgeDisplayName(edgeDetail)
                 + (!"Eased and polished".equals(edgeDetail)
-                ? " - " + number.format(value(edgeLinearFeet)) + " ft × $10 = $" + number.format(edgeTotal)
+                ? " - " + number.format(value(edgeLinearFeet)) + " ft × "
+                + money(edgePrice) + " = " + money(edgeTotal)
                 : " - Free")
                 + "\nRAMSIER'S faucet: " + yesNo(faucetYes)
-                + (faucetYes ? " - $225.00" : "")
+                + (faucetYes ? " - " + money(faucetPrice) : "")
                 + "\nBaskets: " + yesNo(basketsYes)
                 + (basketsYes ? " - " + number.format(value(basketQuantity))
-                + " × $35 = $" + number.format(basketTotal) : "")
+                + " × " + money(basketPrice) + " = " + money(basketTotal) : "")
                 + "\nBig grids: " + yesNo(gridsYes)
                 + (gridsYes ? " - " + number.format(value(gridQuantity))
-                + " × $70 = $" + number.format(gridTotal) : "")
+                + " × " + money(gridPrice) + " = " + money(gridTotal) : "")
                 + "\nCabinets are in: " + yesNo(cabinetsInYes)
                 + "\nApproximate cabinet date: " + textOrNotProvided(cabinetsApproximateDate);
     }
@@ -1652,6 +1754,52 @@ public class MainActivity extends Activity {
         } catch (Exception ignored) {
             return 0;
         }
+    }
+
+    private double priceValue(String key, double defaultValue) {
+        try {
+            return Double.parseDouble(prefs.getString(key, number.format(defaultValue)));
+        } catch (Exception ignored) {
+            return defaultValue;
+        }
+    }
+
+    private String money(double amount) {
+        return "$" + number.format(amount);
+    }
+
+    private String edgeName(String key, String defaultName) {
+        String saved = prefs.getString("edge_name_" + key, defaultName).trim();
+        return saved.isEmpty() ? defaultName : saved;
+    }
+
+    private String edgeDisplayName(String value) {
+        if ("Small round".equals(value)) return edgeName("small_round", "Small round");
+        if ("Big round".equals(value)) return edgeName("big_round", "Big round");
+        if ("Bevel".equals(value)) return edgeName("bevel", "Bevel");
+        if ("Big bevel".equals(value)) return edgeName("big_bevel", "Big bevel");
+        return edgeName("eased", "Eased and polished");
+    }
+
+    private EditText editorField(String labelText, double currentValue) {
+        addHelp(labelText);
+        EditText field = input("Enter price", decimalInput());
+        field.setText(number.format(currentValue));
+        page.addView(field);
+        return field;
+    }
+
+    private EditText editorTextField(String labelText, String currentValue) {
+        addHelp(labelText);
+        EditText field = input("Enter choice name",
+                InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+        field.setText(currentValue);
+        page.addView(field);
+        return field;
+    }
+
+    private boolean isBlank(EditText field) {
+        return field.getText().toString().trim().isEmpty();
     }
 
     private String textOrNotProvided(EditText editText) {
