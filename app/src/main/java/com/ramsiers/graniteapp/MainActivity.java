@@ -520,11 +520,15 @@ public class MainActivity extends Activity {
         navigation.removeAllViews();
         addBrandHeader();
         page.addView(questionTitle("Manage question pages"));
-        addHelp("Use Up and Down to move pages. Remove hides a page. Add Page can bring hidden pages back.");
+        addHelp("Add a new page and name it, or add a deleted page back.");
 
-        Button addPage = primaryButton("Add page");
-        addPage.setOnClickListener(v -> showAddPageDialog());
-        page.addView(addPage);
+        Button addNewPage = primaryButton("Add new page");
+        addNewPage.setOnClickListener(v -> showCustomPageDialog());
+        page.addView(addNewPage);
+
+        Button restorePage = secondaryButton("Add deleted page back");
+        restorePage.setOnClickListener(v -> showAddPageDialog());
+        page.addView(restorePage);
 
         for (int i = 0; i < pageOrder.size(); i++) {
             final int index = i;
@@ -614,19 +618,18 @@ public class MainActivity extends Activity {
                 labels.add("Add: " + customPage.title);
             }
         }
-        labels.add("Create new custom question");
+        if (labels.isEmpty()) {
+            Toast.makeText(this, "There are no deleted pages to add back.", Toast.LENGTH_LONG).show();
+            return;
+        }
         String[] items = labels.toArray(new String[0]);
         new AlertDialog.Builder(this)
-                .setTitle("Add page")
+                .setTitle("Add deleted page back")
                 .setItems(items, (dialog, which) -> {
-                    if (which < availableIds.size()) {
-                        int pageId = availableIds.get(which);
-                        pageOrder.add(pageId);
-                        savePageOrder();
-                        showManagePagesScreen();
-                    } else {
-                        showCustomPageDialog();
-                    }
+                    int pageId = availableIds.get(which);
+                    pageOrder.add(pageId);
+                    savePageOrder();
+                    showManagePagesScreen();
                 })
                 .setNegativeButton("Cancel", null)
                 .show();
@@ -690,7 +693,7 @@ public class MainActivity extends Activity {
         form.addView(question);
 
         new AlertDialog.Builder(this)
-                .setTitle("Create custom page")
+                .setTitle("Add new page")
                 .setView(form)
                 .setPositiveButton("Add", (dialog, which) -> {
                     String newTitle = title.getText().toString().trim();
