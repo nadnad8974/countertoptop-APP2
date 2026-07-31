@@ -395,16 +395,7 @@ public class MainActivity extends Activity {
         hideKeyboard();
         page.addView(questionTitle(questionForEdit(PAGE_COOKTOP_CUTOUT)));
         addHelp(money(priceValue(PRICE_CUTOUT, 100)) + " for each cooktop or extra cutout.");
-        RadioGroup choices = yesNoGroup(cooktopCutoutYes);
-        choices.setOnCheckedChangeListener((group, checkedId) -> {
-            cooktopCutoutYes = checkedYes(group, checkedId);
-            if (cooktopCutoutYes && value(cooktopCutoutQuantity) <= 0) {
-                cooktopCutoutQuantity.setText("1");
-            }
-        });
-        page.addView(choices);
-        detach(cooktopCutoutQuantity);
-        page.addView(cooktopCutoutQuantity);
+        addQuantityStepper(cooktopCutoutQuantity);
         addInlineNavigation();
     }
 
@@ -613,14 +604,6 @@ public class MainActivity extends Activity {
         page.addView(questionTitle(questionForEdit(PAGE_BASKETS)));
         addProductImage(R.drawable.basket_drain, "Basket drain");
         addHelp("Basket drains are " + money(priceValue(PRICE_BASKET, 35)) + " each.");
-        RadioGroup choices = yesNoGroup(basketsYes);
-        choices.setOnCheckedChangeListener((group, checkedId) -> {
-            basketsYes = checkedYes(group, checkedId);
-            if (basketsYes && value(basketQuantity) <= 0) {
-                basketQuantity.setText("1");
-            }
-        });
-        page.addView(choices);
         addQuantityStepper(basketQuantity);
         addInlineNavigation();
     }
@@ -630,14 +613,6 @@ public class MainActivity extends Activity {
         page.addView(questionTitle(questionForEdit(PAGE_GRIDS)));
         addProductImage(R.drawable.sink_grid, "Big sink grid");
         addHelp("Big grids are " + money(priceValue(PRICE_GRID, 70)) + " each.");
-        RadioGroup choices = yesNoGroup(gridsYes);
-        choices.setOnCheckedChangeListener((group, checkedId) -> {
-            gridsYes = checkedYes(group, checkedId);
-            if (gridsYes && value(gridQuantity) <= 0) {
-                gridQuantity.setText("1");
-            }
-        });
-        page.addView(choices);
         addQuantityStepper(gridQuantity);
         addInlineNavigation();
     }
@@ -915,32 +890,12 @@ public class MainActivity extends Activity {
         if (pageId == PAGE_SECTION_QUANTITY && !addCounterSection()) {
             return;
         }
-        if (pageId == PAGE_COOKTOP_CUTOUT
-                && cooktopCutoutYes
-                && value(cooktopCutoutQuantity) <= 0) {
-            Toast.makeText(this, "Enter how many cutouts are needed.", Toast.LENGTH_LONG).show();
-            cooktopCutoutQuantity.requestFocus();
-            showKeyboard(cooktopCutoutQuantity);
-            return;
-        }
         if (pageId == PAGE_EDGE_DETAIL
                 && !"Eased and polished".equals(edgeDetail)
                 && value(edgeLinearFeet) <= 0) {
             Toast.makeText(this, "Enter the edge linear feet.", Toast.LENGTH_LONG).show();
             edgeLinearFeet.requestFocus();
             showKeyboard(edgeLinearFeet);
-            return;
-        }
-        if (pageId == PAGE_BASKETS && basketsYes && value(basketQuantity) <= 0) {
-            Toast.makeText(this, "Enter how many baskets are needed.", Toast.LENGTH_LONG).show();
-            basketQuantity.requestFocus();
-            showKeyboard(basketQuantity);
-            return;
-        }
-        if (pageId == PAGE_GRIDS && gridsYes && value(gridQuantity) <= 0) {
-            Toast.makeText(this, "Enter how many big grids are needed.", Toast.LENGTH_LONG).show();
-            gridQuantity.requestFocus();
-            showKeyboard(gridQuantity);
             return;
         }
         if (pageId >= CUSTOM_PAGE_START) {
@@ -1525,13 +1480,13 @@ public class MainActivity extends Activity {
         double faucetPrice = priceValue(PRICE_FAUCET, 225);
         double basketPrice = priceValue(PRICE_BASKET, 35);
         double gridPrice = priceValue(PRICE_GRID, 70);
-        double cooktopCutoutTotal = cooktopCutoutYes ? value(cooktopCutoutQuantity) * cooktopPrice : 0;
+        double cooktopCutoutTotal = value(cooktopCutoutQuantity) * cooktopPrice;
         double edgeDetailTotal = "Eased and polished".equals(edgeDetail)
                 ? 0
                 : value(edgeLinearFeet) * edgePrice;
         double faucetTotal = faucetYes ? faucetPrice : 0;
-        double basketTotal = basketsYes ? value(basketQuantity) * basketPrice : 0;
-        double gridTotal = gridsYes ? value(gridQuantity) * gridPrice : 0;
+        double basketTotal = value(basketQuantity) * basketPrice;
+        double gridTotal = value(gridQuantity) * gridPrice;
         double total = net * value(pricePerSqFt)
                 + value(sinkCharge)
                 + value(edgeCharge)
@@ -1558,13 +1513,12 @@ public class MainActivity extends Activity {
         double faucetPrice = priceValue(PRICE_FAUCET, 225);
         double basketPrice = priceValue(PRICE_BASKET, 35);
         double gridPrice = priceValue(PRICE_GRID, 70);
-        double cutoutTotal = cooktopCutoutYes ? value(cooktopCutoutQuantity) * cooktopPrice : 0;
+        double cutoutTotal = value(cooktopCutoutQuantity) * cooktopPrice;
         double edgeTotal = "Eased and polished".equals(edgeDetail) ? 0 : value(edgeLinearFeet) * edgePrice;
-        double basketTotal = basketsYes ? value(basketQuantity) * basketPrice : 0;
-        double gridTotal = gridsYes ? value(gridQuantity) * gridPrice : 0;
-        return "Cooktop or extra cutouts: " + yesNo(cooktopCutoutYes)
-                + (cooktopCutoutYes ? " - " + number.format(value(cooktopCutoutQuantity))
-                + " × " + money(cooktopPrice) + " = " + money(cutoutTotal) : "")
+        double basketTotal = value(basketQuantity) * basketPrice;
+        double gridTotal = value(gridQuantity) * gridPrice;
+        return "Cooktop or extra cutouts: " + number.format(value(cooktopCutoutQuantity))
+                + " × " + money(cooktopPrice) + " = " + money(cutoutTotal)
                 + "\nEdge detail: " + edgeDisplayName(edgeDetail)
                 + (!"Eased and polished".equals(edgeDetail)
                 ? " - " + number.format(value(edgeLinearFeet)) + " ft × "
@@ -1573,12 +1527,10 @@ public class MainActivity extends Activity {
                 + "\nSink selection: " + sinkSelectionDisplay()
                 + "\nRAMSIER'S faucet: " + yesNo(faucetYes)
                 + (faucetYes ? " - " + money(faucetPrice) : "")
-                + "\nBasket drains: " + yesNo(basketsYes)
-                + (basketsYes ? " - " + number.format(value(basketQuantity))
-                + " × " + money(basketPrice) + " = " + money(basketTotal) : "")
-                + "\nBig grids: " + yesNo(gridsYes)
-                + (gridsYes ? " - " + number.format(value(gridQuantity))
-                + " × " + money(gridPrice) + " = " + money(gridTotal) : "")
+                + "\nBasket drains: " + number.format(value(basketQuantity))
+                + " × " + money(basketPrice) + " = " + money(basketTotal)
+                + "\nBig grids: " + number.format(value(gridQuantity))
+                + " × " + money(gridPrice) + " = " + money(gridTotal)
                 + "\nCabinets are in: " + yesNo(cabinetsInYes)
                 + "\nApproximate cabinet date: " + textOrNotProvided(cabinetsApproximateDate)
                 + "\nWould like to buy cabinets: " + yesNo(wantsToBuyCabinets)
