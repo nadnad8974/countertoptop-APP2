@@ -1496,10 +1496,11 @@ public class MainActivity extends Activity {
     }
 
     private Estimate calculateAndDisplay(boolean showWarnings) {
-        double gross = 0;
-        for (CounterSection section : sections) gross += section.squareFeet();
-
-        double stove = (value(stoveLength) * value(stoveWidth)) / 144.0;
+        double manualGross = 0;
+        for (CounterSection section : sections) manualGross += section.squareFeet();
+        boolean useAiDrawing = manualGross <= 0 && aiDrawingSquareFeet > 0;
+        double gross = useAiDrawing ? aiDrawingSquareFeet : manualGross;
+        double stove = useAiDrawing ? 0 : (value(stoveLength) * value(stoveWidth)) / 144.0;
         double net = Math.max(0, gross - stove);
         double cooktopPrice = priceValue(PRICE_CUTOUT, 100);
         double edgePrice = priceValue(PRICE_EDGE, 10);
@@ -1528,7 +1529,7 @@ public class MainActivity extends Activity {
         if (totalResult != null) totalResult.setText("Estimated total: $" + number.format(total));
 
         if (showWarnings && gross <= 0) {
-            Toast.makeText(this, "Add at least one countertop section first.", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "Add a countertop section or use the AI drawing estimate first.", Toast.LENGTH_LONG).show();
         }
         return new Estimate(gross, stove, net, total);
     }
