@@ -134,8 +134,12 @@ public class MainActivity extends Activity {
     private EditText equalDoubleSinkQuantity;
     private EditText offsetDoubleSinkQuantity;
     private EditText singleBowlSinkQuantity;
-    private EditText rectangleVanitySinkQuantity;
-    private EditText ovalVanitySinkQuantity;
+    private EditText whiteRectangleVanitySinkQuantity;
+    private EditText biscuitRectangleVanitySinkQuantity;
+    private EditText rectangleVanitySinkLocations;
+    private EditText whiteOvalVanitySinkQuantity;
+    private EditText biscuitOvalVanitySinkQuantity;
+    private EditText ovalVanitySinkLocations;
     private EditText anotherSinkQuantity;
     private EditText undecidedSinkQuantity;
     private EditText basketQuantity;
@@ -150,9 +154,6 @@ public class MainActivity extends Activity {
     private boolean wantsToBuyCabinets;
     private String edgeDetail = "Eased and polished";
     private String sinkSelection = "Not selected";
-    private String vanitySinkColor = "White";
-    private String rectangleVanitySinkColor = "White";
-    private String ovalVanitySinkColor = "White";
     private double aiDrawingSquareFeet;
     private String aiDrawingConfidence = "";
     private String aiDrawingExplanation = "";
@@ -242,8 +243,12 @@ public class MainActivity extends Activity {
         equalDoubleSinkQuantity = quantityInput("How many equal double-bowl kitchen sinks?");
         offsetDoubleSinkQuantity = quantityInput("How many offset double-bowl kitchen sinks?");
         singleBowlSinkQuantity = quantityInput("How many single-bowl kitchen sinks?");
-        rectangleVanitySinkQuantity = quantityInput("How many rectangle vanity sinks?");
-        ovalVanitySinkQuantity = quantityInput("How many oval vanity sinks?");
+        whiteRectangleVanitySinkQuantity = quantityInput("How many white rectangle vanity sinks?");
+        biscuitRectangleVanitySinkQuantity = quantityInput("How many biscuit rectangle vanity sinks?");
+        rectangleVanitySinkLocations = input("Where do the rectangle sinks go? Example: 2 white in master bath, 1 biscuit in boys room", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        whiteOvalVanitySinkQuantity = quantityInput("How many white oval vanity sinks?");
+        biscuitOvalVanitySinkQuantity = quantityInput("How many biscuit oval vanity sinks?");
+        ovalVanitySinkLocations = input("Where do the oval sinks go? Example: 2 white ovals in master bath", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         anotherSinkQuantity = quantityInput("How many sinks are they providing?");
         undecidedSinkQuantity = quantityInput("How many sinks are undecided?");
         basketQuantity = input("How many baskets?", decimalInput());
@@ -415,8 +420,18 @@ public class MainActivity extends Activity {
         addSinkQuantityChoice("Equal double-bowl sink", R.drawable.sink_equal_double, equalDoubleSinkQuantity);
         addSinkQuantityChoice("Offset double-bowl sink", R.drawable.sink_offset_double, offsetDoubleSinkQuantity);
         addSinkQuantityChoice("Single-bowl sink", R.drawable.sink_single_bowl, singleBowlSinkQuantity);
-        addVanitySinkQuantityChoice("Rectangle vanity sink", R.drawable.vanity_sink_rectangle, rectangleVanitySinkQuantity, true);
-        addVanitySinkQuantityChoice("Oval vanity sink", R.drawable.vanity_sink_oval, ovalVanitySinkQuantity, false);
+        addVanitySinkQuantityChoice(
+                "Rectangle bathroom vanity sink",
+                R.drawable.vanity_sink_rectangle,
+                whiteRectangleVanitySinkQuantity,
+                biscuitRectangleVanitySinkQuantity,
+                rectangleVanitySinkLocations);
+        addVanitySinkQuantityChoice(
+                "Oval bathroom vanity sink",
+                R.drawable.vanity_sink_oval,
+                whiteOvalVanitySinkQuantity,
+                biscuitOvalVanitySinkQuantity,
+                ovalVanitySinkLocations);
         addSinkTextQuantityChoice("Customer already has / will provide sink", anotherSinkQuantity);
         addSinkTextQuantityChoice("Undecided sink", undecidedSinkQuantity);
         detach(sinkCharge);
@@ -439,36 +454,28 @@ public class MainActivity extends Activity {
     private void addVanitySinkQuantityChoice(
             String label,
             int imageResource,
-            EditText quantityField,
-            boolean rectangle) {
+            EditText whiteQuantityField,
+            EditText biscuitQuantityField,
+            EditText locationField) {
         page.addView(sectionHeader(label));
         addProductImage(imageResource, label);
-        addQuantityStepper(quantityField);
-
-        RadioGroup colors = new RadioGroup(this);
-        colors.setOrientation(RadioGroup.HORIZONTAL);
-        RadioButton white = radioButton("White", "White");
-        RadioButton biscuit = radioButton("Biscuit", "Biscuit");
-        String selectedColor = rectangle ? rectangleVanitySinkColor : ovalVanitySinkColor;
-        white.setChecked("White".equals(selectedColor));
-        biscuit.setChecked("Biscuit".equals(selectedColor));
-        colors.addView(white, new RadioGroup.LayoutParams(0, dp(52), 1f));
-        colors.addView(biscuit, new RadioGroup.LayoutParams(0, dp(52), 1f));
-        colors.setOnCheckedChangeListener((group, checkedId) -> {
-            View selected = group.findViewById(checkedId);
-            if (selected != null && selected.getTag() instanceof String) {
-                if (rectangle) {
-                    rectangleVanitySinkColor = (String) selected.getTag();
-                } else {
-                    ovalVanitySinkColor = (String) selected.getTag();
-                }
-            }
-        });
-        page.addView(colors);
+        addLabeledQuantityStepper("White", whiteQuantityField);
+        addLabeledQuantityStepper("Biscuit", biscuitQuantityField);
+        detach(locationField);
+        page.addView(locationField);
     }
 
     private void addSinkTextQuantityChoice(String label, EditText quantityField) {
         page.addView(sectionHeader(label));
+        addQuantityStepper(quantityField);
+    }
+
+    private void addLabeledQuantityStepper(String label, EditText quantityField) {
+        TextView text = label(label);
+        text.setTextSize(18);
+        text.setTextColor(Color.rgb(96, 55, 38));
+        text.setPadding(0, dp(12), 0, 0);
+        page.addView(text);
         addQuantityStepper(quantityField);
     }
 
@@ -1589,8 +1596,12 @@ public class MainActivity extends Activity {
         addSinkLine(sinks, "Equal double-bowl sink", equalDoubleSinkQuantity, "");
         addSinkLine(sinks, "Offset double-bowl sink", offsetDoubleSinkQuantity, "");
         addSinkLine(sinks, "Single-bowl sink", singleBowlSinkQuantity, "");
-        addSinkLine(sinks, "Rectangle vanity sink", rectangleVanitySinkQuantity, rectangleVanitySinkColor);
-        addSinkLine(sinks, "Oval vanity sink", ovalVanitySinkQuantity, ovalVanitySinkColor);
+        addSinkLine(sinks, "White rectangle bathroom vanity sink", whiteRectangleVanitySinkQuantity, "");
+        addSinkLine(sinks, "Biscuit rectangle bathroom vanity sink", biscuitRectangleVanitySinkQuantity, "");
+        addSinkLocationLine(sinks, "Rectangle sink locations", rectangleVanitySinkLocations);
+        addSinkLine(sinks, "White oval bathroom vanity sink", whiteOvalVanitySinkQuantity, "");
+        addSinkLine(sinks, "Biscuit oval bathroom vanity sink", biscuitOvalVanitySinkQuantity, "");
+        addSinkLocationLine(sinks, "Oval sink locations", ovalVanitySinkLocations);
         addSinkLine(sinks, "Customer already has / will provide sink", anotherSinkQuantity, "");
         addSinkLine(sinks, "Undecided sink", undecidedSinkQuantity, "");
         if (sinks.isEmpty()) return "No sink selected";
@@ -1610,6 +1621,12 @@ public class MainActivity extends Activity {
                 : number.format(count);
         String colorText = color == null || color.trim().isEmpty() ? "" : " - " + color;
         sinks.add(quantityText + " × " + label + colorText);
+    }
+
+    private void addSinkLocationLine(ArrayList<String> sinks, String label, EditText locationField) {
+        String locations = textOrNotProvided(locationField);
+        if ("Not provided".equals(locations)) return;
+        sinks.add(label + ": " + locations);
     }
 
     private String drawingEstimateSummary() {
@@ -1987,14 +2004,15 @@ public class MainActivity extends Activity {
         wantsToBuyCabinets = false;
         edgeDetail = "Eased and polished";
         sinkSelection = "Not selected";
-        vanitySinkColor = "White";
-        rectangleVanitySinkColor = "White";
-        ovalVanitySinkColor = "White";
         equalDoubleSinkQuantity.setText("0");
         offsetDoubleSinkQuantity.setText("0");
         singleBowlSinkQuantity.setText("0");
-        rectangleVanitySinkQuantity.setText("0");
-        ovalVanitySinkQuantity.setText("0");
+        whiteRectangleVanitySinkQuantity.setText("0");
+        biscuitRectangleVanitySinkQuantity.setText("0");
+        rectangleVanitySinkLocations.setText("");
+        whiteOvalVanitySinkQuantity.setText("0");
+        biscuitOvalVanitySinkQuantity.setText("0");
+        ovalVanitySinkLocations.setText("");
         anotherSinkQuantity.setText("0");
         undecidedSinkQuantity.setText("0");
         aiDrawingSquareFeet = 0;
