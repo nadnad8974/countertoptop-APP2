@@ -284,10 +284,6 @@ public class MainActivity extends Activity {
         progress.setTextColor(Color.GRAY);
         page.addView(progress);
 
-        Button editApp = secondaryButton("Edit app");
-        editApp.setOnClickListener(v -> showLiveEditScreen());
-        page.addView(editApp);
-
         if (stepIndex >= pageOrder.size()) {
             addReviewStep();
         } else {
@@ -625,8 +621,7 @@ public class MainActivity extends Activity {
             }
         });
         page.addView(choices);
-        detach(basketQuantity);
-        page.addView(basketQuantity);
+        addQuantityStepper(basketQuantity);
         addInlineNavigation();
     }
 
@@ -643,8 +638,7 @@ public class MainActivity extends Activity {
             }
         });
         page.addView(choices);
-        detach(gridQuantity);
-        page.addView(gridQuantity);
+        addQuantityStepper(gridQuantity);
         addInlineNavigation();
     }
 
