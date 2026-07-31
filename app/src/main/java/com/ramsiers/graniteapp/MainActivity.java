@@ -2156,7 +2156,7 @@ public class MainActivity extends Activity {
             case PAGE_STOVE_LENGTH: return questionText(pageId, "What is the slide-in stove opening length?");
             case PAGE_STOVE_WIDTH: return questionText(pageId, "What is the slide-in stove opening width?");
             case PAGE_SLABS: return "Which slabs does the customer like?";
-            case PAGE_PHOTO: return "Would you like to add a countertop photo?";
+            case PAGE_PHOTO: return "How would you like to figure out the square footage?";
             case PAGE_ADD_SECTION: return "Would you like to add another countertop section?";
             default: return pageTitle(pageId);
         }
