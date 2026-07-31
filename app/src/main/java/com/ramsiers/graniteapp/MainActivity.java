@@ -13,15 +13,23 @@ import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
+import android.location.Address;
+import android.location.Geocoder;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.MediaStore;
+import android.text.Editable;
 import android.text.InputType;
+import android.text.TextWatcher;
 import android.util.Base64;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.inputmethod.InputMethodManager;
+import android.widget.ArrayAdapter;
+import android.widget.AutoCompleteTextView;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageView;
@@ -133,6 +141,7 @@ public class MainActivity extends Activity {
     private EditText cooktopCutoutQuantity;
     private EditText edgeLinearFeet;
     private EditText faucetQuantity;
+    private EditText cabinetInQuantity;
     private EditText equalDoubleSinkQuantity;
     private EditText offsetDoubleSinkQuantity;
     private EditText singleBowlSinkQuantity;
@@ -154,7 +163,6 @@ public class MainActivity extends Activity {
     private boolean cooktopCutoutYes;
     private boolean basketsYes;
     private boolean gridsYes;
-    private boolean cabinetsInYes;
     private boolean wantsToBuyCabinets;
     private String edgeDetail = "Eased and polished";
     private String sinkSelection = "Not selected";
@@ -173,6 +181,8 @@ public class MainActivity extends Activity {
     private Uri selectedPhotoUri;
     private Uri drawingPhotoUri;
     private int stepIndex = 0;
+    private final Handler addressHandler = new Handler(Looper.getMainLooper());
+    private Runnable addressLookupRunnable;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -213,7 +223,7 @@ public class MainActivity extends Activity {
         customerName = input("Type the customer's full name", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
         customerPhone = input("Type the customer's phone number", InputType.TYPE_CLASS_PHONE);
         customerEmail = input("Type the customer's email", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
-        projectAddress = input("Type the project address", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+        projectAddress = addressInput("Type the project address");
         projectNotes = input("Type any project notes", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         projectNotes.setMinLines(4);
         projectNotes.setGravity(Gravity.TOP);
@@ -245,6 +255,7 @@ public class MainActivity extends Activity {
         edgeLinearFeet = input("How many linear feet receive this edge?", decimalInput());
         edgeLinearFeet.setText("0");
         faucetQuantity = quantityInput("How many RAMSIER'S faucets?");
+        cabinetInQuantity = quantityInput("How many cabinet areas are in?");
         equalDoubleSinkQuantity = quantityInput("How many equal double-bowl kitchen sinks?");
         offsetDoubleSinkQuantity = quantityInput("How many offset double-bowl kitchen sinks?");
         singleBowlSinkQuantity = quantityInput("How many single-bowl kitchen sinks?");
@@ -262,7 +273,7 @@ public class MainActivity extends Activity {
         gridQuantity.setText("0");
         waterfallQuantity = quantityInput("How many waterfall sides?");
         waterfallComments = input("Waterfall comments, if needed", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
-        cabinetsApproximateDate = input("Approximate cabinet date", InputType.TYPE_CLASS_TEXT);
+        cabinetsApproximateDate = input("Approximate cabinet date or notes", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         cabinetInterestComments = input("Cabinet comments, if needed", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
 
         squareFootResult = resultLabel("Net square footage: 0.00");
@@ -653,10 +664,8 @@ public class MainActivity extends Activity {
     private void addCabinetsStep() {
         hideKeyboard();
         page.addView(questionTitle(questionForEdit(PAGE_CABINETS)));
-        RadioGroup choices = yesNoGroup(cabinetsInYes);
-        choices.setOnCheckedChangeListener((group, checkedId) ->
-                cabinetsInYes = checkedYes(group, checkedId));
-        page.addView(choices);
+        addHelp("Use 0 if cabinets are not in yet.");
+        addQuantityStepper(cabinetInQuantity);
         detach(cabinetsApproximateDate);
         page.addView(cabinetsApproximateDate);
         addInlineNavigation();
@@ -1550,8 +1559,8 @@ public class MainActivity extends Activity {
                 + " × " + money(gridPrice) + " = " + money(gridTotal)
                 + "\nWaterfall sides: " + number.format(value(waterfallQuantity))
                 + "\nWaterfall comments: " + textOrNotProvided(waterfallComments)
-                + "\nCabinets are in: " + yesNo(cabinetsInYes)
-                + "\nApproximate cabinet date: " + textOrNotProvided(cabinetsApproximateDate)
+                + "\nCabinet areas in: " + number.format(value(cabinetInQuantity))
+                + "\nCabinet date / notes: " + textOrNotProvided(cabinetsApproximateDate)
                 + "\nCabinet comments: " + textOrNotProvided(cabinetInterestComments)
                 + drawingEstimateSummary();
     }
@@ -1963,12 +1972,12 @@ public class MainActivity extends Activity {
         gridQuantity.setText("0");
         waterfallQuantity.setText("0");
         waterfallComments.setText("");
+        cabinetInQuantity.setText("0");
         cabinetsApproximateDate.setText("");
         cabinetInterestComments.setText("");
         cooktopCutoutYes = false;
         basketsYes = false;
         gridsYes = false;
-        cabinetsInYes = false;
         wantsToBuyCabinets = false;
         edgeDetail = "Eased and polished";
         sinkSelection = "Not selected";
@@ -2110,7 +2119,7 @@ public class MainActivity extends Activity {
             case PAGE_BASKETS: return questionText(pageId, "Would you like basket drains?");
             case PAGE_GRIDS: return questionText(pageId, "Would you like big grids?");
             case PAGE_WATERFALL: return questionText(pageId, "Do they want a waterfall?");
-            case PAGE_CABINETS: return questionText(pageId, "Are the cabinets in?");
+            case PAGE_CABINETS: return questionText(pageId, "How many cabinet areas are in?");
             case PAGE_BUY_CABINETS: return questionText(pageId, "Any cabinet comments?");
             case PAGE_SECTION_NAME: return questionText(pageId, "What should this countertop section be called?");
             case PAGE_SECTION_LENGTH: return questionText(pageId, "What is the section length in inches?");
@@ -2577,6 +2586,70 @@ public class MainActivity extends Activity {
         params.setMargins(0, dp(8), 0, dp(12));
         editText.setLayoutParams(params);
         return editText;
+    }
+
+    private AutoCompleteTextView addressInput(String hint) {
+        AutoCompleteTextView field = new AutoCompleteTextView(this);
+        field.setHint(hint);
+        field.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+        field.setTextSize(19);
+        field.setSingleLine(true);
+        field.setThreshold(4);
+        field.setPadding(dp(14), dp(14), dp(14), dp(14));
+        field.setBackgroundColor(Color.WHITE);
+        field.setSelectAllOnFocus(false);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        params.setMargins(0, dp(8), 0, dp(12));
+        field.setLayoutParams(params);
+        field.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                scheduleAddressLookup(field, s.toString());
+            }
+            @Override public void afterTextChanged(Editable s) {}
+        });
+        return field;
+    }
+
+    private void scheduleAddressLookup(AutoCompleteTextView field, String query) {
+        if (addressLookupRunnable != null) {
+            addressHandler.removeCallbacks(addressLookupRunnable);
+        }
+        String trimmed = query.trim();
+        if (trimmed.length() < 4) return;
+        addressLookupRunnable = () -> lookupAddressSuggestions(field, trimmed);
+        addressHandler.postDelayed(addressLookupRunnable, 550);
+    }
+
+    private void lookupAddressSuggestions(AutoCompleteTextView field, String query) {
+        new Thread(() -> {
+            ArrayList<String> suggestions = new ArrayList<>();
+            try {
+                Geocoder geocoder = new Geocoder(this, Locale.US);
+                String search = query + ", Ohio";
+                List<Address> addresses = geocoder.getFromLocationName(search, 5);
+                if (addresses != null) {
+                    for (Address address : addresses) {
+                        String line = address.getAddressLine(0);
+                        if (line != null && !line.trim().isEmpty() && !suggestions.contains(line)) {
+                            suggestions.add(line);
+                        }
+                    }
+                }
+            } catch (Exception ignored) {
+            }
+            runOnUiThread(() -> {
+                if (!field.getText().toString().trim().equals(query) || suggestions.isEmpty()) return;
+                ArrayAdapter<String> adapter = new ArrayAdapter<>(
+                        this,
+                        android.R.layout.simple_dropdown_item_1line,
+                        suggestions);
+                field.setAdapter(adapter);
+                field.showDropDown();
+            });
+        }).start();
     }
 
     private Button primaryButton(String text) {
