@@ -6,12 +6,16 @@ import android.content.ClipData;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.os.Bundle;
+import android.provider.MediaStore;
 import android.text.InputType;
+import android.util.Base64;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -26,6 +30,8 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.core.content.FileProvider;
+
 import com.google.zxing.BarcodeFormat;
 import com.google.zxing.integration.android.IntentIntegrator;
 import com.google.zxing.integration.android.IntentResult;
@@ -34,6 +40,12 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.text.DecimalFormat;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -41,14 +53,17 @@ import java.util.Locale;
 
 public class MainActivity extends Activity {
     private static final int PICK_IMAGE = 901;
+    private static final int TAKE_DRAWING_PHOTO = 902;
     private static final String PREFS = "ramsiers_granite_app";
     private static final String MSI_VISUALIZER = "https://www.roomvo.com/my/msi/?product_type=1&multi_product_visualizer=5";
+    private static final String DRAWING_AI_ENDPOINT =
+            "https://ramsiers-drawing-ai.nadnad8974.chatgpt.site/api/analyze";
     private static final String PRICE_CUTOUT = "price_cutout";
     private static final String PRICE_EDGE = "price_edge";
     private static final String PRICE_FAUCET = "price_faucet";
     private static final String PRICE_BASKET = "price_basket";
     private static final String PRICE_GRID = "price_grid";
-    private static final String DEFAULT_PAGE_ORDER = "0,1,2,3,6,8,13,14,15,16,17,18,19,9,10,11,12,4";
+    private static final String DEFAULT_PAGE_ORDER = "0,1,2,3,6,8,13,14,15,16,17,18,19,11,12,4";
     private static final String ALL_BUILT_IN_PAGES = "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,100,101,102,103,104,105,106";
     private static final int CUSTOM_PAGE_START = 1000;
     private static final int PAGE_NAME = 0;
@@ -124,12 +139,21 @@ public class MainActivity extends Activity {
     private boolean wantsToBuyCabinets;
     private String edgeDetail = "Eased and polished";
     private String sinkSelection = "Not selected";
+    private String vanitySinkColor = "White";
+    private double aiDrawingSquareFeet;
+    private String aiDrawingConfidence = "";
+    private String aiDrawingExplanation = "";
+    private String aiDrawingMissingInformation = "";
 
     private TextView squareFootResult;
     private TextView totalResult;
     private TextView photoStatus;
+    private TextView drawingStatus;
     private ImageView roomPhoto;
+    private ImageView drawingPhoto;
+    private Button analyzeDrawingButton;
     private Uri selectedPhotoUri;
+    private Uri drawingPhotoUri;
     private int stepIndex = 0;
 
     @Override
@@ -215,6 +239,11 @@ public class MainActivity extends Activity {
         roomPhoto = new ImageView(this);
         roomPhoto.setAdjustViewBounds(true);
         roomPhoto.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        drawingStatus = label("No hand drawing photo selected.");
+        drawingStatus.setTextSize(14);
+        drawingPhoto = new ImageView(this);
+        drawingPhoto.setAdjustViewBounds(true);
+        drawingPhoto.setScaleType(ImageView.ScaleType.CENTER_CROP);
 
         setContentView(screen);
         showStep();
@@ -368,22 +397,8 @@ public class MainActivity extends Activity {
         addImageChoice(choices, "Equal double-bowl sink", R.drawable.sink_equal_double);
         addImageChoice(choices, "Offset double-bowl sink", R.drawable.sink_offset_double);
         addImageChoice(choices, "Single-bowl sink", R.drawable.sink_single_bowl);
-        addImageChoice(
-                choices,
-                "Rectangle vanity sink - White",
-                R.drawable.vanity_sink_rectangle);
-        addImageChoice(
-                choices,
-                "Rectangle vanity sink - Biscuit",
-                R.drawable.vanity_sink_rectangle);
-        addImageChoice(
-                choices,
-                "Oval vanity sink - White",
-                R.drawable.vanity_sink_oval);
-        addImageChoice(
-                choices,
-                "Oval vanity sink - Biscuit",
-                R.drawable.vanity_sink_oval);
+        addImageChoice(choices, "Rectangle vanity sink", R.drawable.vanity_sink_rectangle);
+        addImageChoice(choices, "Oval vanity sink", R.drawable.vanity_sink_oval);
 
         RadioButton anotherSink = radioButton(
                 "Another sink - pick my own",
@@ -401,6 +416,23 @@ public class MainActivity extends Activity {
             }
         });
         page.addView(choices);
+
+        page.addView(sectionHeader("Vanity sink color"));
+        RadioGroup colors = new RadioGroup(this);
+        colors.setOrientation(RadioGroup.HORIZONTAL);
+        RadioButton white = radioButton("White", "White");
+        RadioButton biscuit = radioButton("Biscuit", "Biscuit");
+        white.setChecked("White".equals(vanitySinkColor));
+        biscuit.setChecked("Biscuit".equals(vanitySinkColor));
+        colors.addView(white, new RadioGroup.LayoutParams(0, dp(52), 1f));
+        colors.addView(biscuit, new RadioGroup.LayoutParams(0, dp(52), 1f));
+        colors.setOnCheckedChangeListener((group, checkedId) -> {
+            View selected = group.findViewById(checkedId);
+            if (selected != null && selected.getTag() instanceof String) {
+                vanitySinkColor = (String) selected.getTag();
+            }
+        });
+        page.addView(colors);
 
         detach(sinkCharge);
         page.addView(sinkCharge);
@@ -670,6 +702,23 @@ public class MainActivity extends Activity {
         page.addView(photoStatus);
         detach(roomPhoto);
         page.addView(roomPhoto, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(220)));
+
+        page.addView(sectionHeader("Hand-drawn countertop plan"));
+        addHelp("Take a clear, straight picture that shows every dimension and its unit.");
+        Button drawingButton = primaryButton("Take picture of hand drawing");
+        drawingButton.setOnClickListener(v -> takeDrawingPhoto());
+        page.addView(drawingButton);
+
+        detach(drawingStatus);
+        page.addView(drawingStatus);
+        detach(drawingPhoto);
+        page.addView(drawingPhoto, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(220)));
+
+        analyzeDrawingButton = primaryButton("Figure square footage with AI");
+        analyzeDrawingButton.setEnabled(drawingPhotoUri != null);
+        analyzeDrawingButton.setOnClickListener(v -> analyzeDrawing());
+        page.addView(analyzeDrawingButton);
+        addHelp("AI estimate only. Verify every dimension before using it for a price.");
 
         Button visualizer = secondaryButton("Open MSI room visualizer");
         visualizer.setOnClickListener(v -> openWebPage(MSI_VISUALIZER));
@@ -1450,7 +1499,7 @@ public class MainActivity extends Activity {
                 ? " - " + number.format(value(edgeLinearFeet)) + " ft × "
                 + money(edgePrice) + " = " + money(edgeTotal)
                 : " - Free")
-                + "\nSink selection: " + sinkSelection
+                + "\nSink selection: " + sinkSelectionDisplay()
                 + "\nRAMSIER'S faucet: " + yesNo(faucetYes)
                 + (faucetYes ? " - " + money(faucetPrice) : "")
                 + "\nBasket drains: " + yesNo(basketsYes)
@@ -1461,7 +1510,26 @@ public class MainActivity extends Activity {
                 + " × " + money(gridPrice) + " = " + money(gridTotal) : "")
                 + "\nCabinets are in: " + yesNo(cabinetsInYes)
                 + "\nApproximate cabinet date: " + textOrNotProvided(cabinetsApproximateDate)
-                + "\nWould like to buy cabinets: " + yesNo(wantsToBuyCabinets);
+                + "\nWould like to buy cabinets: " + yesNo(wantsToBuyCabinets)
+                + drawingEstimateSummary();
+    }
+
+    private String sinkSelectionDisplay() {
+        if ("Rectangle vanity sink".equals(sinkSelection)
+                || "Oval vanity sink".equals(sinkSelection)) {
+            return sinkSelection + " - " + vanitySinkColor;
+        }
+        return sinkSelection;
+    }
+
+    private String drawingEstimateSummary() {
+        if (aiDrawingExplanation.isEmpty()) return "";
+        return "\nAI drawing estimate: " + number.format(aiDrawingSquareFeet) + " sq ft"
+                + "\nAI confidence: " + aiDrawingConfidence
+                + "\nAI calculation: " + aiDrawingExplanation
+                + (aiDrawingMissingInformation.isEmpty()
+                ? ""
+                : "\nMissing drawing information: " + aiDrawingMissingInformation);
     }
 
     private void openPhotoPicker() {
@@ -1470,6 +1538,145 @@ public class MainActivity extends Activity {
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("image/*");
         startActivityForResult(intent, PICK_IMAGE);
+    }
+
+    private void takeDrawingPhoto() {
+        hideKeyboard();
+        try {
+            File drawingDirectory = new File(getCacheDir(), "drawing_photos");
+            if (!drawingDirectory.exists() && !drawingDirectory.mkdirs()) {
+                throw new IllegalStateException("Could not create drawing photo folder");
+            }
+            File drawingFile = new File(
+                    drawingDirectory,
+                    "countertop-drawing-" + System.currentTimeMillis() + ".jpg");
+            drawingPhotoUri = FileProvider.getUriForFile(
+                    this,
+                    getPackageName() + ".fileprovider",
+                    drawingFile);
+            Intent camera = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+            camera.putExtra(MediaStore.EXTRA_OUTPUT, drawingPhotoUri);
+            camera.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            startActivityForResult(camera, TAKE_DRAWING_PHOTO);
+        } catch (Exception e) {
+            Toast.makeText(this, "The camera could not be opened.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void analyzeDrawing() {
+        if (drawingPhotoUri == null) {
+            Toast.makeText(this, "Take a picture of the hand drawing first.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        analyzeDrawingButton.setEnabled(false);
+        drawingStatus.setText("Reading the drawing and calculating square footage...");
+
+        new Thread(() -> {
+            try {
+                String image = drawingImageDataUrl();
+                HttpURLConnection connection =
+                        (HttpURLConnection) new URL(DRAWING_AI_ENDPOINT).openConnection();
+                connection.setRequestMethod("POST");
+                connection.setConnectTimeout(30000);
+                connection.setReadTimeout(120000);
+                connection.setDoOutput(true);
+                connection.setRequestProperty("Content-Type", "application/json");
+                connection.setRequestProperty("X-Ramsiers-App", "countertop-quote-v1");
+
+                JSONObject request = new JSONObject();
+                request.put("image", image);
+                byte[] requestBytes = request.toString().getBytes(StandardCharsets.UTF_8);
+                connection.getOutputStream().write(requestBytes);
+
+                int responseCode = connection.getResponseCode();
+                InputStream responseStream = responseCode >= 200 && responseCode < 300
+                        ? connection.getInputStream()
+                        : connection.getErrorStream();
+                JSONObject response = new JSONObject(readText(responseStream));
+                if (responseCode < 200 || responseCode >= 300) {
+                    throw new IllegalStateException(
+                            response.optString("error", "The drawing could not be analyzed."));
+                }
+
+                double squareFeet = response.optDouble("square_feet", 0);
+                String confidence = response.optString("confidence", "low");
+                String explanation = response.optString("explanation", "");
+                String missingInformation = response.optString("missing_information", "");
+                runOnUiThread(() -> showDrawingResult(
+                        squareFeet,
+                        confidence,
+                        explanation,
+                        missingInformation));
+            } catch (Exception e) {
+                String message = e.getMessage() == null
+                        ? "The drawing could not be analyzed. Please try again."
+                        : e.getMessage();
+                runOnUiThread(() -> {
+                    drawingStatus.setText(message);
+                    analyzeDrawingButton.setEnabled(true);
+                });
+            }
+        }).start();
+    }
+
+    private String drawingImageDataUrl() throws Exception {
+        Bitmap original;
+        try (InputStream input = getContentResolver().openInputStream(drawingPhotoUri)) {
+            original = BitmapFactory.decodeStream(input);
+        }
+        if (original == null) throw new IllegalStateException("The drawing photo could not be read.");
+
+        int width = original.getWidth();
+        int height = original.getHeight();
+        int largest = Math.max(width, height);
+        Bitmap upload = original;
+        if (largest > 1600) {
+            double scale = 1600.0 / largest;
+            upload = Bitmap.createScaledBitmap(
+                    original,
+                    Math.max(1, (int) Math.round(width * scale)),
+                    Math.max(1, (int) Math.round(height * scale)),
+                    true);
+        }
+
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        upload.compress(Bitmap.CompressFormat.JPEG, 86, output);
+        if (upload != original) upload.recycle();
+        original.recycle();
+        return "data:image/jpeg;base64,"
+                + Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP);
+    }
+
+    private String readText(InputStream input) throws Exception {
+        if (input == null) return "{}";
+        try (InputStream stream = input; ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[8192];
+            int count;
+            while ((count = stream.read(buffer)) != -1) {
+                output.write(buffer, 0, count);
+            }
+            return output.toString(StandardCharsets.UTF_8.name());
+        }
+    }
+
+    private void showDrawingResult(
+            double squareFeet,
+            String confidence,
+            String explanation,
+            String missingInformation) {
+        aiDrawingSquareFeet = Math.max(0, squareFeet);
+        aiDrawingConfidence = confidence;
+        aiDrawingExplanation = explanation;
+        aiDrawingMissingInformation = missingInformation;
+        String result = "AI estimate: " + number.format(aiDrawingSquareFeet) + " sq ft"
+                + "\nConfidence: " + confidence
+                + "\n" + explanation;
+        if (!missingInformation.isEmpty()) {
+            result += "\nMissing information: " + missingInformation;
+        }
+        result += "\nVerify all dimensions before pricing.";
+        drawingStatus.setText(result);
+        analyzeDrawingButton.setEnabled(true);
     }
 
     @Override
@@ -1489,6 +1696,17 @@ public class MainActivity extends Activity {
             }
             roomPhoto.setImageURI(selectedPhotoUri);
             photoStatus.setText("Photo selected and ready to attach to the email.");
+        }
+        if (requestCode == TAKE_DRAWING_PHOTO) {
+            if (resultCode == RESULT_OK && drawingPhotoUri != null) {
+                drawingPhoto.setImageURI(drawingPhotoUri);
+                drawingStatus.setText("Drawing photo ready. Tap the AI button below.");
+                if (analyzeDrawingButton != null) analyzeDrawingButton.setEnabled(true);
+            } else {
+                drawingPhotoUri = null;
+                drawingStatus.setText("No hand drawing photo selected.");
+                if (analyzeDrawingButton != null) analyzeDrawingButton.setEnabled(false);
+            }
         }
     }
 
@@ -1578,6 +1796,7 @@ public class MainActivity extends Activity {
         slabs.clear();
         sections.clear();
         selectedPhotoUri = null;
+        drawingPhotoUri = null;
         customerName.setText("");
         customerPhone.setText("");
         customerEmail.setText("");
@@ -1607,8 +1826,15 @@ public class MainActivity extends Activity {
         wantsToBuyCabinets = false;
         edgeDetail = "Eased and polished";
         sinkSelection = "Not selected";
+        vanitySinkColor = "White";
+        aiDrawingSquareFeet = 0;
+        aiDrawingConfidence = "";
+        aiDrawingExplanation = "";
+        aiDrawingMissingInformation = "";
         roomPhoto.setImageDrawable(null);
+        drawingPhoto.setImageDrawable(null);
         photoStatus.setText("No photo selected.");
+        drawingStatus.setText("No hand drawing photo selected.");
         squareFootResult.setText("Net square footage: 0.00");
         totalResult.setText("Estimated total: $0.00");
         stepIndex = 0;
@@ -1803,6 +2029,7 @@ public class MainActivity extends Activity {
         addNewPricingPagesOnce();
         addCabinetSalesPageOnce();
         applyV120PageChangesOnce();
+        applyV121PageChangesOnce();
     }
 
     private void addNewPricingPagesOnce() {
@@ -1846,6 +2073,14 @@ public class MainActivity extends Activity {
         pageOrder.add(PAGE_NOTES);
         savePageOrder();
         prefs.edit().putBoolean("v1_20_page_changes_applied", true).apply();
+    }
+
+    private void applyV121PageChangesOnce() {
+        if (prefs.getBoolean("v1_21_page_changes_applied", false)) return;
+        pageOrder.remove(Integer.valueOf(PAGE_EDGE_CHARGE));
+        pageOrder.remove(Integer.valueOf(PAGE_TEAR_OUT));
+        savePageOrder();
+        prefs.edit().putBoolean("v1_21_page_changes_applied", true).apply();
     }
 
     private void loadDefaultPageOrder() {
