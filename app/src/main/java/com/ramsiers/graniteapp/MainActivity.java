@@ -2,6 +2,7 @@ package com.ramsiers.graniteapp;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.Manifest;
 import android.content.ClipData;
 import android.content.Context;
 import android.content.Intent;
@@ -66,6 +67,7 @@ public class MainActivity extends Activity {
     private static final int PICK_IMAGE = 901;
     private static final int TAKE_DRAWING_PHOTO = 902;
     private static final int PICK_DRAWING_IMAGE = 903;
+    private static final int CAMERA_PERMISSION = 904;
     private static final String PREFS = "ramsiers_granite_app";
     private static final String MSI_VISUALIZER = "https://www.roomvo.com/my/msi/?product_type=1&multi_product_visualizer=5";
     private static final String DRAWING_AI_ENDPOINT =
@@ -1651,6 +1653,14 @@ public class MainActivity extends Activity {
 
     private void takeDrawingPhoto() {
         hideKeyboard();
+        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.CAMERA}, CAMERA_PERMISSION);
+            return;
+        }
+        openDrawingCamera();
+    }
+
+    private void openDrawingCamera() {
         try {
             File drawingDirectory = new File(getCacheDir(), "drawing_photos");
             if (!drawingDirectory.exists() && !drawingDirectory.mkdirs()) {
@@ -1691,6 +1701,17 @@ public class MainActivity extends Activity {
             startActivityForResult(camera, TAKE_DRAWING_PHOTO);
         } catch (Exception ignored) {
             Toast.makeText(this, "The camera could not be opened.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode != CAMERA_PERMISSION) return;
+        if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            openDrawingCamera();
+        } else {
+            Toast.makeText(this, "Allow camera access to take a hand drawing photo.", Toast.LENGTH_LONG).show();
         }
     }
 
