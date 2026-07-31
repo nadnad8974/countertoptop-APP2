@@ -67,8 +67,8 @@ public class MainActivity extends Activity {
     private static final String PRICE_FAUCET = "price_faucet";
     private static final String PRICE_BASKET = "price_basket";
     private static final String PRICE_GRID = "price_grid";
-    private static final String DEFAULT_PAGE_ORDER = "0,1,2,3,8,13,15,16,17,18,19,11,12,6,14,4";
-    private static final String ALL_BUILT_IN_PAGES = "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,100,101,102,103,104,105,106";
+    private static final String DEFAULT_PAGE_ORDER = "0,1,2,3,8,13,15,16,17,20,18,19,11,12,14,6,4";
+    private static final String ALL_BUILT_IN_PAGES = "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,100,101,102,103,104,105,106";
     private static final int CUSTOM_PAGE_START = 1000;
     private static final int PAGE_NAME = 0;
     private static final int PAGE_PHONE = 1;
@@ -90,6 +90,7 @@ public class MainActivity extends Activity {
     private static final int PAGE_GRIDS = 17;
     private static final int PAGE_CABINETS = 18;
     private static final int PAGE_BUY_CABINETS = 19;
+    private static final int PAGE_WATERFALL = 20;
     private static final int PAGE_SECTION_NAME = 100;
     private static final int PAGE_SECTION_LENGTH = 101;
     private static final int PAGE_SECTION_WIDTH = 102;
@@ -144,7 +145,10 @@ public class MainActivity extends Activity {
     private EditText undecidedSinkQuantity;
     private EditText basketQuantity;
     private EditText gridQuantity;
+    private EditText waterfallQuantity;
+    private EditText waterfallComments;
     private EditText cabinetsApproximateDate;
+    private EditText cabinetInterestComments;
 
     private boolean cooktopCutoutYes;
     private boolean faucetYes;
@@ -255,7 +259,10 @@ public class MainActivity extends Activity {
         basketQuantity.setText("0");
         gridQuantity = input("How many big grids?", decimalInput());
         gridQuantity.setText("0");
+        waterfallQuantity = quantityInput("How many waterfall sides?");
+        waterfallComments = input("Waterfall comments, if needed", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         cabinetsApproximateDate = input("Approximate cabinet date", InputType.TYPE_CLASS_TEXT);
+        cabinetInterestComments = input("Cabinet comments, if needed", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
 
         squareFootResult = resultLabel("Net square footage: 0.00");
         totalResult = resultLabel("Estimated total: $0.00");
@@ -346,6 +353,9 @@ public class MainActivity extends Activity {
                 break;
             case PAGE_GRIDS:
                 addGridsStep();
+                break;
+            case PAGE_WATERFALL:
+                addWaterfallStep();
                 break;
             case PAGE_CABINETS:
                 addCabinetsStep();
@@ -617,6 +627,16 @@ public class MainActivity extends Activity {
         addInlineNavigation();
     }
 
+    private void addWaterfallStep() {
+        hideKeyboard();
+        page.addView(questionTitle(questionForEdit(PAGE_WATERFALL)));
+        addHelp("Use 0 if they do not want a waterfall.");
+        addQuantityStepper(waterfallQuantity);
+        detach(waterfallComments);
+        page.addView(waterfallComments);
+        addInlineNavigation();
+    }
+
     private void addProductImage(int imageResource, String description) {
         ImageView image = new ImageView(this);
         image.setImageResource(imageResource);
@@ -647,10 +667,9 @@ public class MainActivity extends Activity {
     private void addBuyCabinetsStep() {
         hideKeyboard();
         page.addView(questionTitle(questionForEdit(PAGE_BUY_CABINETS)));
-        RadioGroup choices = yesNoGroup(wantsToBuyCabinets);
-        choices.setOnCheckedChangeListener((group, checkedId) ->
-                wantsToBuyCabinets = checkedYes(group, checkedId));
-        page.addView(choices);
+        addHelp("Add cabinet notes only if needed.");
+        detach(cabinetInterestComments);
+        page.addView(cabinetInterestComments);
         addInlineNavigation();
     }
 
@@ -1531,9 +1550,11 @@ public class MainActivity extends Activity {
                 + " × " + money(basketPrice) + " = " + money(basketTotal)
                 + "\nBig grids: " + number.format(value(gridQuantity))
                 + " × " + money(gridPrice) + " = " + money(gridTotal)
+                + "\nWaterfall sides: " + number.format(value(waterfallQuantity))
+                + "\nWaterfall comments: " + textOrNotProvided(waterfallComments)
                 + "\nCabinets are in: " + yesNo(cabinetsInYes)
                 + "\nApproximate cabinet date: " + textOrNotProvided(cabinetsApproximateDate)
-                + "\nWould like to buy cabinets: " + yesNo(wantsToBuyCabinets)
+                + "\nCabinet comments: " + textOrNotProvided(cabinetInterestComments)
                 + drawingEstimateSummary();
     }
 
@@ -1941,7 +1962,10 @@ public class MainActivity extends Activity {
         edgeLinearFeet.setText("0");
         basketQuantity.setText("0");
         gridQuantity.setText("0");
+        waterfallQuantity.setText("0");
+        waterfallComments.setText("");
         cabinetsApproximateDate.setText("");
+        cabinetInterestComments.setText("");
         cooktopCutoutYes = false;
         faucetYes = false;
         basketsYes = false;
@@ -2039,6 +2063,7 @@ public class MainActivity extends Activity {
             case PAGE_FAUCET: return "RAMSIER'S faucet";
             case PAGE_BASKETS: return "Basket drains";
             case PAGE_GRIDS: return "Big grids";
+            case PAGE_WATERFALL: return "Waterfall";
             case PAGE_CABINETS: return "Cabinet status";
             case PAGE_BUY_CABINETS: return "Buy cabinets";
             case PAGE_SECTION_NAME: return "Countertop section name";
@@ -2086,8 +2111,9 @@ public class MainActivity extends Activity {
             case PAGE_FAUCET: return questionText(pageId, "Would you like a RAMSIER'S faucet?");
             case PAGE_BASKETS: return questionText(pageId, "Would you like basket drains?");
             case PAGE_GRIDS: return questionText(pageId, "Would you like big grids?");
+            case PAGE_WATERFALL: return questionText(pageId, "Do they want a waterfall?");
             case PAGE_CABINETS: return questionText(pageId, "Are the cabinets in?");
-            case PAGE_BUY_CABINETS: return questionText(pageId, "Would you like to buy cabinets from RAMSIER'S?");
+            case PAGE_BUY_CABINETS: return questionText(pageId, "Any cabinet comments?");
             case PAGE_SECTION_NAME: return questionText(pageId, "What should this countertop section be called?");
             case PAGE_SECTION_LENGTH: return questionText(pageId, "What is the section length in inches?");
             case PAGE_SECTION_WIDTH: return questionText(pageId, "What is the section width in inches?");
@@ -2165,6 +2191,7 @@ public class MainActivity extends Activity {
         applyV120PageChangesOnce();
         applyV121PageChangesOnce();
         applyV122PageChangesOnce();
+        applyV127PageChangesOnce();
     }
 
     private void addNewPricingPagesOnce() {
@@ -2177,6 +2204,7 @@ public class MainActivity extends Activity {
                 PAGE_FAUCET,
                 PAGE_BASKETS,
                 PAGE_GRIDS,
+                PAGE_WATERFALL,
                 PAGE_CABINETS
         };
         for (int pageId : newPages) {
@@ -2224,6 +2252,18 @@ public class MainActivity extends Activity {
         movePageBefore(PAGE_EDGE_DETAIL, PAGE_NOTES);
         savePageOrder();
         prefs.edit().putBoolean("v1_22_page_changes_applied", true).apply();
+    }
+
+    private void applyV127PageChangesOnce() {
+        if (prefs.getBoolean("v1_27_page_changes_applied", false)) return;
+        if (!pageOrder.contains(PAGE_WATERFALL)) {
+            int gridPage = pageOrder.indexOf(PAGE_GRIDS);
+            int insertAt = gridPage >= 0 ? gridPage + 1 : pageOrder.size();
+            pageOrder.add(insertAt, PAGE_WATERFALL);
+        }
+        movePageBefore(PAGE_EDGE_DETAIL, PAGE_SLABS);
+        savePageOrder();
+        prefs.edit().putBoolean("v1_27_page_changes_applied", true).apply();
     }
 
     private void movePageBefore(int pageId, int beforePageId) {
@@ -2312,6 +2352,7 @@ public class MainActivity extends Activity {
                 || pageId == PAGE_FAUCET
                 || pageId == PAGE_BASKETS
                 || pageId == PAGE_GRIDS
+                || pageId == PAGE_WATERFALL
                 || pageId == PAGE_CABINETS
                 || pageId == PAGE_BUY_CABINETS
                 || pageId == PAGE_SECTION_NAME
