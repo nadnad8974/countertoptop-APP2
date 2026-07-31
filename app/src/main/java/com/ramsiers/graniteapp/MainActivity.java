@@ -2636,11 +2636,10 @@ public class MainActivity extends Activity {
             ArrayList<String> suggestions = new ArrayList<>();
             try {
                 Geocoder geocoder = new Geocoder(this, Locale.US);
-                String search = query + ", Ohio";
-                List<Address> addresses = geocoder.getFromLocationName(search, 5);
+                List<Address> addresses = geocoder.getFromLocationName(query, 5);
                 if (addresses != null) {
                     for (Address address : addresses) {
-                        String line = address.getAddressLine(0);
+                        String line = fullStreetAddress(address);
                         if (line != null && !line.trim().isEmpty() && !suggestions.contains(line)) {
                             suggestions.add(line);
                         }
@@ -2658,6 +2657,22 @@ public class MainActivity extends Activity {
                 field.showDropDown();
             });
         }).start();
+    }
+
+    private String fullStreetAddress(Address address) {
+        String number = address.getSubThoroughfare();
+        String street = address.getThoroughfare();
+        if (number == null || number.trim().isEmpty() || street == null || street.trim().isEmpty()) {
+            return null;
+        }
+        StringBuilder line = new StringBuilder(number.trim()).append(" ").append(street.trim());
+        String city = address.getLocality();
+        if (city != null && !city.trim().isEmpty()) line.append(", ").append(city.trim());
+        String state = address.getAdminArea();
+        if (state != null && !state.trim().isEmpty()) line.append(", ").append(state.trim());
+        String zip = address.getPostalCode();
+        if (zip != null && !zip.trim().isEmpty()) line.append(" ").append(zip.trim());
+        return line.toString();
     }
 
     private Button primaryButton(String text) {
