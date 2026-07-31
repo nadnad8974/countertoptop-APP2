@@ -132,6 +132,7 @@ public class MainActivity extends Activity {
     private EditText otherCharge;
     private EditText cooktopCutoutQuantity;
     private EditText edgeLinearFeet;
+    private EditText faucetQuantity;
     private EditText equalDoubleSinkQuantity;
     private EditText offsetDoubleSinkQuantity;
     private EditText singleBowlSinkQuantity;
@@ -151,7 +152,6 @@ public class MainActivity extends Activity {
     private EditText cabinetInterestComments;
 
     private boolean cooktopCutoutYes;
-    private boolean faucetYes;
     private boolean basketsYes;
     private boolean gridsYes;
     private boolean cabinetsInYes;
@@ -244,6 +244,7 @@ public class MainActivity extends Activity {
         cooktopCutoutQuantity.setText("0");
         edgeLinearFeet = input("How many linear feet receive this edge?", decimalInput());
         edgeLinearFeet.setText("0");
+        faucetQuantity = quantityInput("How many RAMSIER'S faucets?");
         equalDoubleSinkQuantity = quantityInput("How many equal double-bowl kitchen sinks?");
         offsetDoubleSinkQuantity = quantityInput("How many offset double-bowl kitchen sinks?");
         singleBowlSinkQuantity = quantityInput("How many single-bowl kitchen sinks?");
@@ -602,10 +603,7 @@ public class MainActivity extends Activity {
         hideKeyboard();
         page.addView(questionTitle(questionForEdit(PAGE_FAUCET)));
         addHelp("RAMSIER'S faucet: " + money(priceValue(PRICE_FAUCET, 225)) + ".");
-        RadioGroup choices = yesNoGroup(faucetYes);
-        choices.setOnCheckedChangeListener((group, checkedId) ->
-                faucetYes = checkedYes(group, checkedId));
-        page.addView(choices);
+        addQuantityStepper(faucetQuantity);
         addInlineNavigation();
     }
 
@@ -1503,7 +1501,7 @@ public class MainActivity extends Activity {
         double edgeDetailTotal = "Eased and polished".equals(edgeDetail)
                 ? 0
                 : value(edgeLinearFeet) * edgePrice;
-        double faucetTotal = faucetYes ? faucetPrice : 0;
+        double faucetTotal = value(faucetQuantity) * faucetPrice;
         double basketTotal = value(basketQuantity) * basketPrice;
         double gridTotal = value(gridQuantity) * gridPrice;
         double total = net * value(pricePerSqFt)
@@ -1544,8 +1542,8 @@ public class MainActivity extends Activity {
                 + money(edgePrice) + " = " + money(edgeTotal)
                 : " - Free")
                 + "\nSink selection: " + sinkSelectionDisplay()
-                + "\nRAMSIER'S faucet: " + yesNo(faucetYes)
-                + (faucetYes ? " - " + money(faucetPrice) : "")
+                + "\nRAMSIER'S faucet: " + number.format(value(faucetQuantity))
+                + " × " + money(faucetPrice) + " = " + money(value(faucetQuantity) * faucetPrice)
                 + "\nBasket drains: " + number.format(value(basketQuantity))
                 + " × " + money(basketPrice) + " = " + money(basketTotal)
                 + "\nBig grids: " + number.format(value(gridQuantity))
@@ -1960,6 +1958,7 @@ public class MainActivity extends Activity {
         otherCharge.setText("");
         cooktopCutoutQuantity.setText("0");
         edgeLinearFeet.setText("0");
+        faucetQuantity.setText("0");
         basketQuantity.setText("0");
         gridQuantity.setText("0");
         waterfallQuantity.setText("0");
@@ -1967,7 +1966,6 @@ public class MainActivity extends Activity {
         cabinetsApproximateDate.setText("");
         cabinetInterestComments.setText("");
         cooktopCutoutYes = false;
-        faucetYes = false;
         basketsYes = false;
         gridsYes = false;
         cabinetsInYes = false;
