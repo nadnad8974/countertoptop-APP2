@@ -6,6 +6,8 @@ import android.content.ClipData;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
@@ -49,6 +51,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
 
 public class MainActivity extends Activity {
@@ -63,7 +66,7 @@ public class MainActivity extends Activity {
     private static final String PRICE_FAUCET = "price_faucet";
     private static final String PRICE_BASKET = "price_basket";
     private static final String PRICE_GRID = "price_grid";
-    private static final String DEFAULT_PAGE_ORDER = "0,1,2,3,6,8,13,14,15,16,17,18,19,11,12,4";
+    private static final String DEFAULT_PAGE_ORDER = "0,1,2,3,8,13,15,16,17,18,19,11,12,6,14,4";
     private static final String ALL_BUILT_IN_PAGES = "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,100,101,102,103,104,105,106";
     private static final int CUSTOM_PAGE_START = 1000;
     private static final int PAGE_NAME = 0;
@@ -127,6 +130,12 @@ public class MainActivity extends Activity {
     private EditText otherCharge;
     private EditText cooktopCutoutQuantity;
     private EditText edgeLinearFeet;
+    private EditText equalDoubleSinkQuantity;
+    private EditText offsetDoubleSinkQuantity;
+    private EditText singleBowlSinkQuantity;
+    private EditText rectangleVanitySinkQuantity;
+    private EditText ovalVanitySinkQuantity;
+    private EditText anotherSinkQuantity;
     private EditText basketQuantity;
     private EditText gridQuantity;
     private EditText cabinetsApproximateDate;
@@ -226,6 +235,12 @@ public class MainActivity extends Activity {
         cooktopCutoutQuantity.setText("0");
         edgeLinearFeet = input("How many linear feet receive this edge?", decimalInput());
         edgeLinearFeet.setText("0");
+        equalDoubleSinkQuantity = quantityInput("How many equal double-bowl kitchen sinks?");
+        offsetDoubleSinkQuantity = quantityInput("How many offset double-bowl kitchen sinks?");
+        singleBowlSinkQuantity = quantityInput("How many single-bowl kitchen sinks?");
+        rectangleVanitySinkQuantity = quantityInput("How many rectangle vanity sinks?");
+        ovalVanitySinkQuantity = quantityInput("How many oval vanity sinks?");
+        anotherSinkQuantity = quantityInput("How many customer-picked sinks?");
         basketQuantity = input("How many baskets?", decimalInput());
         basketQuantity.setText("0");
         gridQuantity = input("How many big grids?", decimalInput());
@@ -390,32 +405,13 @@ public class MainActivity extends Activity {
     private void addSinkSelectionStep() {
         hideKeyboard();
         page.addView(questionTitle(questionForEdit(PAGE_SINK_CHARGE)));
-        addHelp("Tap the sink the customer wants. Enter a sink or cutout charge below if needed.");
+        addHelp("Enter how many of each sink the job needs. Use 0 for anything they do not want.");
 
-        RadioGroup choices = new RadioGroup(this);
-        choices.setOrientation(RadioGroup.VERTICAL);
-        addImageChoice(choices, "Equal double-bowl sink", R.drawable.sink_equal_double);
-        addImageChoice(choices, "Offset double-bowl sink", R.drawable.sink_offset_double);
-        addImageChoice(choices, "Single-bowl sink", R.drawable.sink_single_bowl);
-        addImageChoice(choices, "Rectangle vanity sink", R.drawable.vanity_sink_rectangle);
-        addImageChoice(choices, "Oval vanity sink", R.drawable.vanity_sink_oval);
-
-        RadioButton anotherSink = radioButton(
-                "Another sink - pick my own",
-                "Another sink - pick my own");
-        anotherSink.setChecked("Another sink - pick my own".equals(sinkSelection));
-        choices.addView(anotherSink);
-
-        RadioButton noSelection = radioButton("No sink selected", "Not selected");
-        noSelection.setChecked("Not selected".equals(sinkSelection));
-        choices.addView(noSelection);
-        choices.setOnCheckedChangeListener((group, checkedId) -> {
-            View selected = group.findViewById(checkedId);
-            if (selected != null && selected.getTag() instanceof String) {
-                sinkSelection = (String) selected.getTag();
-            }
-        });
-        page.addView(choices);
+        addSinkQuantityChoice("Equal double-bowl sink", R.drawable.sink_equal_double, equalDoubleSinkQuantity);
+        addSinkQuantityChoice("Offset double-bowl sink", R.drawable.sink_offset_double, offsetDoubleSinkQuantity);
+        addSinkQuantityChoice("Single-bowl sink", R.drawable.sink_single_bowl, singleBowlSinkQuantity);
+        addSinkQuantityChoice("Rectangle vanity sink", R.drawable.vanity_sink_rectangle, rectangleVanitySinkQuantity);
+        addSinkQuantityChoice("Oval vanity sink", R.drawable.vanity_sink_oval, ovalVanitySinkQuantity);
 
         page.addView(sectionHeader("Vanity sink color"));
         RadioGroup colors = new RadioGroup(this);
@@ -434,9 +430,24 @@ public class MainActivity extends Activity {
         });
         page.addView(colors);
 
+        detach(anotherSinkQuantity);
+        page.addView(anotherSinkQuantity);
         detach(sinkCharge);
         page.addView(sinkCharge);
         addInlineNavigation();
+    }
+
+    private EditText quantityInput(String hint) {
+        EditText field = input(hint, decimalInput());
+        field.setText("0");
+        return field;
+    }
+
+    private void addSinkQuantityChoice(String label, int imageResource, EditText quantityField) {
+        page.addView(sectionHeader(label));
+        addProductImage(imageResource, label);
+        detach(quantityField);
+        page.addView(quantityField);
     }
 
     private void addAddressStep() {
@@ -1515,11 +1526,30 @@ public class MainActivity extends Activity {
     }
 
     private String sinkSelectionDisplay() {
-        if ("Rectangle vanity sink".equals(sinkSelection)
-                || "Oval vanity sink".equals(sinkSelection)) {
-            return sinkSelection + " - " + vanitySinkColor;
+        ArrayList<String> sinks = new ArrayList<>();
+        addSinkLine(sinks, "Equal double-bowl sink", equalDoubleSinkQuantity, "");
+        addSinkLine(sinks, "Offset double-bowl sink", offsetDoubleSinkQuantity, "");
+        addSinkLine(sinks, "Single-bowl sink", singleBowlSinkQuantity, "");
+        addSinkLine(sinks, "Rectangle vanity sink", rectangleVanitySinkQuantity, vanitySinkColor);
+        addSinkLine(sinks, "Oval vanity sink", ovalVanitySinkQuantity, vanitySinkColor);
+        addSinkLine(sinks, "Customer-picked sink", anotherSinkQuantity, "");
+        if (sinks.isEmpty()) return "No sink selected";
+        StringBuilder result = new StringBuilder();
+        for (String sink : sinks) {
+            if (result.length() > 0) result.append(", ");
+            result.append(sink);
         }
-        return sinkSelection;
+        return result.toString();
+    }
+
+    private void addSinkLine(ArrayList<String> sinks, String label, EditText quantityField, String color) {
+        double count = value(quantityField);
+        if (count <= 0) return;
+        String quantityText = count % 1 == 0
+                ? String.valueOf((int) count)
+                : number.format(count);
+        String colorText = color == null || color.trim().isEmpty() ? "" : " - " + color;
+        sinks.add(quantityText + " × " + label + colorText);
     }
 
     private String drawingEstimateSummary() {
@@ -1557,8 +1587,30 @@ public class MainActivity extends Activity {
             Intent camera = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
             camera.putExtra(MediaStore.EXTRA_OUTPUT, drawingPhotoUri);
             camera.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            camera.setClipData(ClipData.newUri(getContentResolver(), "Hand drawing", drawingPhotoUri));
+            grantCameraUriPermissions(camera, drawingPhotoUri);
             startActivityForResult(camera, TAKE_DRAWING_PHOTO);
         } catch (Exception e) {
+            openDrawingCameraWithoutFileOutput();
+        }
+    }
+
+    private void grantCameraUriPermissions(Intent camera, Uri uri) {
+        List<ResolveInfo> cameras = getPackageManager().queryIntentActivities(camera, PackageManager.MATCH_DEFAULT_ONLY);
+        for (ResolveInfo cameraApp : cameras) {
+            grantUriPermission(
+                    cameraApp.activityInfo.packageName,
+                    uri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+        }
+    }
+
+    private void openDrawingCameraWithoutFileOutput() {
+        drawingPhotoUri = null;
+        try {
+            Intent camera = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+            startActivityForResult(camera, TAKE_DRAWING_PHOTO);
+        } catch (Exception ignored) {
             Toast.makeText(this, "The camera could not be opened.", Toast.LENGTH_LONG).show();
         }
     }
@@ -1702,11 +1754,41 @@ public class MainActivity extends Activity {
                 drawingPhoto.setImageURI(drawingPhotoUri);
                 drawingStatus.setText("Drawing photo ready. Tap the AI button below.");
                 if (analyzeDrawingButton != null) analyzeDrawingButton.setEnabled(true);
+            } else if (resultCode == RESULT_OK && data != null && data.getExtras() != null
+                    && data.getExtras().get("data") instanceof Bitmap) {
+                drawingPhotoUri = saveDrawingBitmap((Bitmap) data.getExtras().get("data"));
+                if (drawingPhotoUri != null) {
+                    drawingPhoto.setImageURI(drawingPhotoUri);
+                    drawingStatus.setText("Drawing photo ready. Tap the AI button below.");
+                    if (analyzeDrawingButton != null) analyzeDrawingButton.setEnabled(true);
+                } else {
+                    drawingStatus.setText("The drawing photo could not be saved.");
+                    if (analyzeDrawingButton != null) analyzeDrawingButton.setEnabled(false);
+                }
             } else {
                 drawingPhotoUri = null;
                 drawingStatus.setText("No hand drawing photo selected.");
                 if (analyzeDrawingButton != null) analyzeDrawingButton.setEnabled(false);
             }
+        }
+    }
+
+    private Uri saveDrawingBitmap(Bitmap bitmap) {
+        try {
+            File drawingDirectory = new File(getCacheDir(), "drawing_photos");
+            if (!drawingDirectory.exists() && !drawingDirectory.mkdirs()) return null;
+            File drawingFile = new File(
+                    drawingDirectory,
+                    "countertop-drawing-" + System.currentTimeMillis() + ".jpg");
+            try (java.io.FileOutputStream output = new java.io.FileOutputStream(drawingFile)) {
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 90, output);
+            }
+            return FileProvider.getUriForFile(
+                    this,
+                    getPackageName() + ".fileprovider",
+                    drawingFile);
+        } catch (Exception ignored) {
+            return null;
         }
     }
 
@@ -1827,6 +1909,12 @@ public class MainActivity extends Activity {
         edgeDetail = "Eased and polished";
         sinkSelection = "Not selected";
         vanitySinkColor = "White";
+        equalDoubleSinkQuantity.setText("0");
+        offsetDoubleSinkQuantity.setText("0");
+        singleBowlSinkQuantity.setText("0");
+        rectangleVanitySinkQuantity.setText("0");
+        ovalVanitySinkQuantity.setText("0");
+        anotherSinkQuantity.setText("0");
         aiDrawingSquareFeet = 0;
         aiDrawingConfidence = "";
         aiDrawingExplanation = "";
@@ -1943,7 +2031,7 @@ public class MainActivity extends Activity {
             case PAGE_NOTES: return questionText(pageId, "Are there any project notes?");
             case PAGE_OFFICE_EMAIL: return questionText(pageId, "What email should receive the quote request?");
             case PAGE_PRICE: return questionText(pageId, "What is the installed price per square foot?");
-            case PAGE_SINK_CHARGE: return questionText(pageId, "Which sink would you like?");
+            case PAGE_SINK_CHARGE: return questionText(pageId, "Which sinks would you like?");
             case PAGE_EDGE_CHARGE: return questionText(pageId, "What is the edge or extra labor charge?");
             case PAGE_TEAR_OUT: return questionText(pageId, "What is the tear-out charge?");
             case PAGE_OTHER_CHARGE: return questionText(pageId, "Are there any other charges?");
@@ -2030,6 +2118,7 @@ public class MainActivity extends Activity {
         addCabinetSalesPageOnce();
         applyV120PageChangesOnce();
         applyV121PageChangesOnce();
+        applyV122PageChangesOnce();
     }
 
     private void addNewPricingPagesOnce() {
@@ -2081,6 +2170,24 @@ public class MainActivity extends Activity {
         pageOrder.remove(Integer.valueOf(PAGE_TEAR_OUT));
         savePageOrder();
         prefs.edit().putBoolean("v1_21_page_changes_applied", true).apply();
+    }
+
+    private void applyV122PageChangesOnce() {
+        if (prefs.getBoolean("v1_22_page_changes_applied", false)) return;
+        movePageBefore(PAGE_SLABS, PAGE_NOTES);
+        movePageBefore(PAGE_EDGE_DETAIL, PAGE_NOTES);
+        savePageOrder();
+        prefs.edit().putBoolean("v1_22_page_changes_applied", true).apply();
+    }
+
+    private void movePageBefore(int pageId, int beforePageId) {
+        pageOrder.remove(Integer.valueOf(pageId));
+        int beforeIndex = pageOrder.indexOf(beforePageId);
+        if (beforeIndex < 0) {
+            pageOrder.add(pageId);
+        } else {
+            pageOrder.add(beforeIndex, pageId);
+        }
     }
 
     private void loadDefaultPageOrder() {
