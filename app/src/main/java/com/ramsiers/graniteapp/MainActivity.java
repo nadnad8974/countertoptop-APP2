@@ -181,6 +181,7 @@ public class MainActivity extends Activity {
     private Uri selectedPhotoUri;
     private Uri drawingPhotoUri;
     private int stepIndex = 0;
+    private int photoAccordionOpen = 0;
     private final Handler addressHandler = new Handler(Looper.getMainLooper());
     private Runnable addressLookupRunnable;
 
@@ -759,43 +760,61 @@ public class MainActivity extends Activity {
         hideKeyboard();
         page.clearFocus();
         page.addView(questionTitle(questionForEdit(PAGE_PHOTO)));
-        addHelp("The photo screen is separate from all typing screens, so the keyboard will not cover it.");
+        addHelp("Tap a section to open it. Opening one closes the other.");
 
-        Button photoButton = primaryButton("Choose kitchen or countertop photo");
-        photoButton.setOnClickListener(v -> openPhotoPicker());
-        page.addView(photoButton);
+        Button countertopPhoto = accordionButton("Countertop photo", photoAccordionOpen == 1);
+        countertopPhoto.setOnClickListener(v -> togglePhotoAccordion(1));
+        page.addView(countertopPhoto);
+        if (photoAccordionOpen == 1) {
+            Button photoButton = primaryButton("Choose kitchen or countertop photo");
+            photoButton.setOnClickListener(v -> openPhotoPicker());
+            page.addView(photoButton);
+            if (selectedPhotoUri != null) {
+                detach(photoStatus);
+                page.addView(photoStatus);
+                detach(roomPhoto);
+                page.addView(roomPhoto, new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, dp(220)));
+            }
+        }
 
-        detach(photoStatus);
-        page.addView(photoStatus);
-        detach(roomPhoto);
-        page.addView(roomPhoto, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(220)));
+        Button drawingPlan = accordionButton("Hand-drawn countertop plan", photoAccordionOpen == 2);
+        drawingPlan.setOnClickListener(v -> togglePhotoAccordion(2));
+        page.addView(drawingPlan);
+        if (photoAccordionOpen == 2) {
+            addHelp("Take a clear, straight picture that shows every dimension and its unit.");
+            Button drawingButton = primaryButton("Take picture of hand drawing");
+            drawingButton.setOnClickListener(v -> takeDrawingPhoto());
+            page.addView(drawingButton);
 
-        page.addView(sectionHeader("Hand-drawn countertop plan"));
-        addHelp("Take a clear, straight picture that shows every dimension and its unit.");
-        Button drawingButton = primaryButton("Take picture of hand drawing");
-        drawingButton.setOnClickListener(v -> takeDrawingPhoto());
-        page.addView(drawingButton);
+            Button drawingUploadButton = secondaryButton("Choose hand drawing photo from phone");
+            drawingUploadButton.setOnClickListener(v -> openDrawingPhotoPicker());
+            page.addView(drawingUploadButton);
 
-        Button drawingUploadButton = secondaryButton("Choose hand drawing photo from phone");
-        drawingUploadButton.setOnClickListener(v -> openDrawingPhotoPicker());
-        page.addView(drawingUploadButton);
-
-        detach(drawingStatus);
-        page.addView(drawingStatus);
-        detach(drawingPhoto);
-        page.addView(drawingPhoto, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(220)));
-
-        analyzeDrawingButton = primaryButton("Figure square footage with AI");
-        analyzeDrawingButton.setEnabled(drawingPhotoUri != null);
-        analyzeDrawingButton.setOnClickListener(v -> analyzeDrawing());
-        page.addView(analyzeDrawingButton);
-        addHelp("AI estimate only. Verify every dimension before using it for a price.");
+            if (drawingPhotoUri != null) {
+                detach(drawingStatus);
+                page.addView(drawingStatus);
+                detach(drawingPhoto);
+                page.addView(drawingPhoto, new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, dp(220)));
+                analyzeDrawingButton = primaryButton("Figure square footage with AI");
+                analyzeDrawingButton.setEnabled(true);
+                analyzeDrawingButton.setOnClickListener(v -> analyzeDrawing());
+                page.addView(analyzeDrawingButton);
+                addHelp("AI estimate only. Verify every dimension before using it for a price.");
+            }
+        }
 
         Button visualizer = secondaryButton("Open MSI room visualizer");
         visualizer.setOnClickListener(v -> openWebPage(MSI_VISUALIZER));
         page.addView(visualizer);
         addHelp("You may skip the photo and tap Next.");
         addInlineNavigation();
+    }
+
+    private void togglePhotoAccordion(int section) {
+        photoAccordionOpen = photoAccordionOpen == section ? 0 : section;
+        showStep();
     }
 
     private void addReviewStep() {
@@ -1808,6 +1827,8 @@ public class MainActivity extends Activity {
             }
             roomPhoto.setImageURI(selectedPhotoUri);
             photoStatus.setText("Photo selected and ready to attach to the email.");
+            photoAccordionOpen = 1;
+            showStep();
         }
         if (requestCode == PICK_DRAWING_IMAGE && resultCode == RESULT_OK && data != null && data.getData() != null) {
             drawingPhotoUri = data.getData();
@@ -1819,12 +1840,16 @@ public class MainActivity extends Activity {
             drawingPhoto.setImageURI(drawingPhotoUri);
             drawingStatus.setText("Drawing photo ready. Tap the AI button below.");
             if (analyzeDrawingButton != null) analyzeDrawingButton.setEnabled(true);
+            photoAccordionOpen = 2;
+            showStep();
         }
         if (requestCode == TAKE_DRAWING_PHOTO) {
             if (resultCode == RESULT_OK && drawingPhotoUri != null) {
                 drawingPhoto.setImageURI(drawingPhotoUri);
                 drawingStatus.setText("Drawing photo ready. Tap the AI button below.");
                 if (analyzeDrawingButton != null) analyzeDrawingButton.setEnabled(true);
+                photoAccordionOpen = 2;
+                showStep();
             } else if (resultCode == RESULT_OK && data != null && data.getExtras() != null
                     && data.getExtras().get("data") instanceof Bitmap) {
                 drawingPhotoUri = saveDrawingBitmap((Bitmap) data.getExtras().get("data"));
@@ -1832,6 +1857,8 @@ public class MainActivity extends Activity {
                     drawingPhoto.setImageURI(drawingPhotoUri);
                     drawingStatus.setText("Drawing photo ready. Tap the AI button below.");
                     if (analyzeDrawingButton != null) analyzeDrawingButton.setEnabled(true);
+                    photoAccordionOpen = 2;
+                    showStep();
                 } else {
                     drawingStatus.setText("The drawing photo could not be saved.");
                     if (analyzeDrawingButton != null) analyzeDrawingButton.setEnabled(false);
@@ -2559,6 +2586,23 @@ public class MainActivity extends Activity {
         params.setMargins(0, dp(18), 0, dp(8));
         view.setLayoutParams(params);
         return view;
+    }
+
+    private Button accordionButton(String text, boolean open) {
+        Button button = new Button(this);
+        button.setText((open ? "▲  " : "▼  ") + text);
+        button.setAllCaps(false);
+        button.setTextSize(18);
+        button.setTypeface(Typeface.DEFAULT_BOLD);
+        button.setTextColor(Color.WHITE);
+        button.setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
+        button.setBackgroundColor(Color.rgb(91, 58, 41));
+        button.setPadding(dp(12), 0, dp(12), 0);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(54));
+        params.setMargins(0, dp(12), 0, 0);
+        button.setLayoutParams(params);
+        return button;
     }
 
     private TextView label(String text) {
