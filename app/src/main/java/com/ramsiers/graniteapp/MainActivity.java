@@ -75,7 +75,7 @@ public class MainActivity extends Activity {
     private static final String PRICE_FAUCET = "price_faucet";
     private static final String PRICE_BASKET = "price_basket";
     private static final String PRICE_GRID = "price_grid";
-    private static final String DEFAULT_PAGE_ORDER = "0,1,2,3,8,13,15,16,17,20,18,19,11,12,14,6,4";
+    private static final String DEFAULT_PAGE_ORDER = "0,1,2,3,8,13,15,16,17,20,14,18,19,11,12,6,4";
     private static final String ALL_BUILT_IN_PAGES = "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,100,101,102,103,104,105,106";
     private static final int CUSTOM_PAGE_START = 1000;
     private static final int PAGE_NAME = 0;
@@ -2199,6 +2199,7 @@ public class MainActivity extends Activity {
         applyV121PageChangesOnce();
         applyV122PageChangesOnce();
         applyV127PageChangesOnce();
+        applyV130PageChangesOnce();
     }
 
     private void addNewPricingPagesOnce() {
@@ -2271,6 +2272,13 @@ public class MainActivity extends Activity {
         movePageBefore(PAGE_EDGE_DETAIL, PAGE_SLABS);
         savePageOrder();
         prefs.edit().putBoolean("v1_27_page_changes_applied", true).apply();
+    }
+
+    private void applyV130PageChangesOnce() {
+        if (prefs.getBoolean("v1_30_page_changes_applied", false)) return;
+        movePageBefore(PAGE_EDGE_DETAIL, PAGE_CABINETS);
+        savePageOrder();
+        prefs.edit().putBoolean("v1_30_page_changes_applied", true).apply();
     }
 
     private void movePageBefore(int pageId, int beforePageId) {
