@@ -639,7 +639,7 @@ public class MainActivity extends Activity {
     private void addWaterfallStep() {
         hideKeyboard();
         page.addView(questionTitle(questionForEdit(PAGE_WATERFALL)));
-        addHelp("Use 0 if they do not want a waterfall.");
+        addHelp("Use 0 if you do not want a waterfall.");
         addQuantityStepper(waterfallQuantity);
         detach(waterfallComments);
         page.addView(waterfallComments);
@@ -2118,7 +2118,7 @@ public class MainActivity extends Activity {
             case PAGE_FAUCET: return questionText(pageId, "Would you like a RAMSIER'S faucet?");
             case PAGE_BASKETS: return questionText(pageId, "Would you like basket drains?");
             case PAGE_GRIDS: return questionText(pageId, "Would you like big grids?");
-            case PAGE_WATERFALL: return questionText(pageId, "Do they want a waterfall?");
+            case PAGE_WATERFALL: return questionText(pageId, "Do you want a waterfall?");
             case PAGE_CABINETS: return questionText(pageId, "How many cabinet areas are in?");
             case PAGE_BUY_CABINETS: return questionText(pageId, "Any cabinet comments?");
             case PAGE_SECTION_NAME: return questionText(pageId, "What should this countertop section be called?");
