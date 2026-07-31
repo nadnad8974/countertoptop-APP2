@@ -48,7 +48,7 @@ public class MainActivity extends Activity {
     private static final String PRICE_FAUCET = "price_faucet";
     private static final String PRICE_BASKET = "price_basket";
     private static final String PRICE_GRID = "price_grid";
-    private static final String DEFAULT_PAGE_ORDER = "0,1,2,3,4,5,6,7,8,13,14,15,16,17,18,19,9,10,11,12";
+    private static final String DEFAULT_PAGE_ORDER = "0,1,2,3,6,8,13,14,15,16,17,18,19,9,10,11,12,4";
     private static final String ALL_BUILT_IN_PAGES = "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,100,101,102,103,104,105,106";
     private static final int CUSTOM_PAGE_START = 1000;
     private static final int PAGE_NAME = 0;
@@ -255,7 +255,7 @@ public class MainActivity extends Activity {
                 addQuestion(questionText(pageId, "What is the customer's email address?"), customerEmail, true);
                 break;
             case PAGE_ADDRESS:
-                addQuestion(questionText(pageId, "What is the project address?"), projectAddress, true);
+                addAddressStep();
                 break;
             case PAGE_NOTES:
                 addQuestion(questionText(pageId, "Are there any project notes?"), projectNotes, true);
@@ -368,6 +368,28 @@ public class MainActivity extends Activity {
         addImageChoice(choices, "Equal double-bowl sink", R.drawable.sink_equal_double);
         addImageChoice(choices, "Offset double-bowl sink", R.drawable.sink_offset_double);
         addImageChoice(choices, "Single-bowl sink", R.drawable.sink_single_bowl);
+        addImageChoice(
+                choices,
+                "Rectangle vanity sink - White",
+                R.drawable.vanity_sink_rectangle);
+        addImageChoice(
+                choices,
+                "Rectangle vanity sink - Biscuit",
+                R.drawable.vanity_sink_rectangle);
+        addImageChoice(
+                choices,
+                "Oval vanity sink - White",
+                R.drawable.vanity_sink_oval);
+        addImageChoice(
+                choices,
+                "Oval vanity sink - Biscuit",
+                R.drawable.vanity_sink_oval);
+
+        RadioButton anotherSink = radioButton(
+                "Another sink - pick my own",
+                "Another sink - pick my own");
+        anotherSink.setChecked("Another sink - pick my own".equals(sinkSelection));
+        choices.addView(anotherSink);
 
         RadioButton noSelection = radioButton("No sink selected", "Not selected");
         noSelection.setChecked("Not selected".equals(sinkSelection));
@@ -383,6 +405,41 @@ public class MainActivity extends Activity {
         detach(sinkCharge);
         page.addView(sinkCharge);
         addInlineNavigation();
+    }
+
+    private void addAddressStep() {
+        page.addView(questionTitle(questionForEdit(PAGE_ADDRESS)));
+        detach(projectAddress);
+        page.addView(projectAddress);
+
+        Button maps = secondaryButton("Open in Google Maps");
+        maps.setOnClickListener(v -> openAddressInMaps());
+        page.addView(maps);
+        addInlineNavigation();
+
+        projectAddress.requestFocus();
+        projectAddress.postDelayed(() -> {
+            scroll.smoothScrollTo(0, Math.max(0, projectAddress.getTop() - dp(24)));
+            showKeyboard(projectAddress);
+        }, 220);
+    }
+
+    private void openAddressInMaps() {
+        String address = projectAddress.getText().toString().trim();
+        if (address.isEmpty()) {
+            Toast.makeText(this, "Enter the project address first.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        hideKeyboard();
+        Intent maps = new Intent(
+                Intent.ACTION_VIEW,
+                Uri.parse("geo:0,0?q=" + Uri.encode(address)));
+        maps.setPackage("com.google.android.apps.maps");
+        try {
+            startActivity(maps);
+        } catch (Exception ignored) {
+            openWebPage("https://www.google.com/maps/search/?api=1&query=" + Uri.encode(address));
+        }
     }
 
     private void addImageChoice(RadioGroup group, String label, int imageResource) {
@@ -1437,13 +1494,9 @@ public class MainActivity extends Activity {
 
     private void sendQuoteEmail() {
         String to = officeEmail.getText().toString().trim();
-        if (to.isEmpty() || !to.contains("@")) {
-            Toast.makeText(this, "Enter RAMSIER'S office email first.", Toast.LENGTH_LONG).show();
-            stepIndex = 5;
-            showStep();
-            return;
+        if (!to.isEmpty() && to.contains("@")) {
+            prefs.edit().putString("office_email", to).apply();
         }
-        prefs.edit().putString("office_email", to).apply();
         Estimate estimate = calculateAndDisplay(false);
 
         StringBuilder body = new StringBuilder();
@@ -1495,7 +1548,9 @@ public class MainActivity extends Activity {
 
         Intent email = new Intent(Intent.ACTION_SEND);
         email.setType(selectedPhotoUri == null ? "text/plain" : "image/*");
-        email.putExtra(Intent.EXTRA_EMAIL, new String[]{to});
+        if (!to.isEmpty() && to.contains("@")) {
+            email.putExtra(Intent.EXTRA_EMAIL, new String[]{to});
+        }
         email.putExtra(Intent.EXTRA_SUBJECT, "New countertop quote request - " + text(customerName));
         email.putExtra(Intent.EXTRA_TEXT, body.toString());
         if (selectedPhotoUri != null) {
@@ -1747,6 +1802,7 @@ public class MainActivity extends Activity {
         }
         addNewPricingPagesOnce();
         addCabinetSalesPageOnce();
+        applyV120PageChangesOnce();
     }
 
     private void addNewPricingPagesOnce() {
@@ -1780,6 +1836,16 @@ public class MainActivity extends Activity {
             savePageOrder();
         }
         prefs.edit().putBoolean("v1_19_cabinet_sales_page_added", true).apply();
+    }
+
+    private void applyV120PageChangesOnce() {
+        if (prefs.getBoolean("v1_20_page_changes_applied", false)) return;
+        pageOrder.remove(Integer.valueOf(PAGE_OFFICE_EMAIL));
+        pageOrder.remove(Integer.valueOf(PAGE_PRICE));
+        pageOrder.remove(Integer.valueOf(PAGE_NOTES));
+        pageOrder.add(PAGE_NOTES);
+        savePageOrder();
+        prefs.edit().putBoolean("v1_20_page_changes_applied", true).apply();
     }
 
     private void loadDefaultPageOrder() {
