@@ -57,6 +57,7 @@ import java.util.Locale;
 public class MainActivity extends Activity {
     private static final int PICK_IMAGE = 901;
     private static final int TAKE_DRAWING_PHOTO = 902;
+    private static final int PICK_DRAWING_IMAGE = 903;
     private static final String PREFS = "ramsiers_granite_app";
     private static final String MSI_VISUALIZER = "https://www.roomvo.com/my/msi/?product_type=1&multi_product_visualizer=5";
     private static final String DRAWING_AI_ENDPOINT =
@@ -136,6 +137,7 @@ public class MainActivity extends Activity {
     private EditText rectangleVanitySinkQuantity;
     private EditText ovalVanitySinkQuantity;
     private EditText anotherSinkQuantity;
+    private EditText undecidedSinkQuantity;
     private EditText basketQuantity;
     private EditText gridQuantity;
     private EditText cabinetsApproximateDate;
@@ -149,6 +151,8 @@ public class MainActivity extends Activity {
     private String edgeDetail = "Eased and polished";
     private String sinkSelection = "Not selected";
     private String vanitySinkColor = "White";
+    private String rectangleVanitySinkColor = "White";
+    private String ovalVanitySinkColor = "White";
     private double aiDrawingSquareFeet;
     private String aiDrawingConfidence = "";
     private String aiDrawingExplanation = "";
@@ -240,7 +244,8 @@ public class MainActivity extends Activity {
         singleBowlSinkQuantity = quantityInput("How many single-bowl kitchen sinks?");
         rectangleVanitySinkQuantity = quantityInput("How many rectangle vanity sinks?");
         ovalVanitySinkQuantity = quantityInput("How many oval vanity sinks?");
-        anotherSinkQuantity = quantityInput("How many customer-picked sinks?");
+        anotherSinkQuantity = quantityInput("How many sinks are they providing?");
+        undecidedSinkQuantity = quantityInput("How many sinks are undecided?");
         basketQuantity = input("How many baskets?", decimalInput());
         basketQuantity.setText("0");
         gridQuantity = input("How many big grids?", decimalInput());
@@ -410,28 +415,10 @@ public class MainActivity extends Activity {
         addSinkQuantityChoice("Equal double-bowl sink", R.drawable.sink_equal_double, equalDoubleSinkQuantity);
         addSinkQuantityChoice("Offset double-bowl sink", R.drawable.sink_offset_double, offsetDoubleSinkQuantity);
         addSinkQuantityChoice("Single-bowl sink", R.drawable.sink_single_bowl, singleBowlSinkQuantity);
-        addSinkQuantityChoice("Rectangle vanity sink", R.drawable.vanity_sink_rectangle, rectangleVanitySinkQuantity);
-        addSinkQuantityChoice("Oval vanity sink", R.drawable.vanity_sink_oval, ovalVanitySinkQuantity);
-
-        page.addView(sectionHeader("Vanity sink color"));
-        RadioGroup colors = new RadioGroup(this);
-        colors.setOrientation(RadioGroup.HORIZONTAL);
-        RadioButton white = radioButton("White", "White");
-        RadioButton biscuit = radioButton("Biscuit", "Biscuit");
-        white.setChecked("White".equals(vanitySinkColor));
-        biscuit.setChecked("Biscuit".equals(vanitySinkColor));
-        colors.addView(white, new RadioGroup.LayoutParams(0, dp(52), 1f));
-        colors.addView(biscuit, new RadioGroup.LayoutParams(0, dp(52), 1f));
-        colors.setOnCheckedChangeListener((group, checkedId) -> {
-            View selected = group.findViewById(checkedId);
-            if (selected != null && selected.getTag() instanceof String) {
-                vanitySinkColor = (String) selected.getTag();
-            }
-        });
-        page.addView(colors);
-
-        detach(anotherSinkQuantity);
-        page.addView(anotherSinkQuantity);
+        addVanitySinkQuantityChoice("Rectangle vanity sink", R.drawable.vanity_sink_rectangle, rectangleVanitySinkQuantity, true);
+        addVanitySinkQuantityChoice("Oval vanity sink", R.drawable.vanity_sink_oval, ovalVanitySinkQuantity, false);
+        addSinkTextQuantityChoice("Customer already has / will provide sink", anotherSinkQuantity);
+        addSinkTextQuantityChoice("Undecided sink", undecidedSinkQuantity);
         detach(sinkCharge);
         page.addView(sinkCharge);
         addInlineNavigation();
@@ -446,8 +433,76 @@ public class MainActivity extends Activity {
     private void addSinkQuantityChoice(String label, int imageResource, EditText quantityField) {
         page.addView(sectionHeader(label));
         addProductImage(imageResource, label);
+        addQuantityStepper(quantityField);
+    }
+
+    private void addVanitySinkQuantityChoice(
+            String label,
+            int imageResource,
+            EditText quantityField,
+            boolean rectangle) {
+        page.addView(sectionHeader(label));
+        addProductImage(imageResource, label);
+        addQuantityStepper(quantityField);
+
+        RadioGroup colors = new RadioGroup(this);
+        colors.setOrientation(RadioGroup.HORIZONTAL);
+        RadioButton white = radioButton("White", "White");
+        RadioButton biscuit = radioButton("Biscuit", "Biscuit");
+        String selectedColor = rectangle ? rectangleVanitySinkColor : ovalVanitySinkColor;
+        white.setChecked("White".equals(selectedColor));
+        biscuit.setChecked("Biscuit".equals(selectedColor));
+        colors.addView(white, new RadioGroup.LayoutParams(0, dp(52), 1f));
+        colors.addView(biscuit, new RadioGroup.LayoutParams(0, dp(52), 1f));
+        colors.setOnCheckedChangeListener((group, checkedId) -> {
+            View selected = group.findViewById(checkedId);
+            if (selected != null && selected.getTag() instanceof String) {
+                if (rectangle) {
+                    rectangleVanitySinkColor = (String) selected.getTag();
+                } else {
+                    ovalVanitySinkColor = (String) selected.getTag();
+                }
+            }
+        });
+        page.addView(colors);
+    }
+
+    private void addSinkTextQuantityChoice(String label, EditText quantityField) {
+        page.addView(sectionHeader(label));
+        addQuantityStepper(quantityField);
+    }
+
+    private void addQuantityStepper(EditText quantityField) {
         detach(quantityField);
-        page.addView(quantityField);
+        quantityField.setGravity(Gravity.CENTER);
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER);
+        row.setPadding(0, dp(4), 0, dp(12));
+
+        Button down = secondaryButton("▼");
+        down.setTextSize(22);
+        down.setOnClickListener(v -> setQuantity(quantityField, Math.max(0, value(quantityField) - 1)));
+        row.addView(down, new LinearLayout.LayoutParams(0, dp(58), 1f));
+
+        row.addView(quantityField, new LinearLayout.LayoutParams(0, dp(58), 1f));
+
+        Button up = primaryButton("▲");
+        up.setTextSize(22);
+        up.setOnClickListener(v -> setQuantity(quantityField, value(quantityField) + 1));
+        row.addView(up, new LinearLayout.LayoutParams(0, dp(58), 1f));
+
+        page.addView(row, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+    }
+
+    private void setQuantity(EditText field, double value) {
+        if (value % 1 == 0) {
+            field.setText(String.valueOf((int) value));
+        } else {
+            field.setText(number.format(value));
+        }
     }
 
     private void addAddressStep() {
@@ -707,7 +762,6 @@ public class MainActivity extends Activity {
         Button photoButton = primaryButton("Choose kitchen or countertop photo");
         photoButton.setOnClickListener(v -> openPhotoPicker());
         page.addView(photoButton);
-        addInlineNavigation();
 
         detach(photoStatus);
         page.addView(photoStatus);
@@ -719,6 +773,10 @@ public class MainActivity extends Activity {
         Button drawingButton = primaryButton("Take picture of hand drawing");
         drawingButton.setOnClickListener(v -> takeDrawingPhoto());
         page.addView(drawingButton);
+
+        Button drawingUploadButton = secondaryButton("Choose hand drawing photo from phone");
+        drawingUploadButton.setOnClickListener(v -> openDrawingPhotoPicker());
+        page.addView(drawingUploadButton);
 
         detach(drawingStatus);
         page.addView(drawingStatus);
@@ -735,6 +793,7 @@ public class MainActivity extends Activity {
         visualizer.setOnClickListener(v -> openWebPage(MSI_VISUALIZER));
         page.addView(visualizer);
         addHelp("You may skip the photo and tap Next.");
+        addInlineNavigation();
     }
 
     private void addReviewStep() {
@@ -1530,9 +1589,10 @@ public class MainActivity extends Activity {
         addSinkLine(sinks, "Equal double-bowl sink", equalDoubleSinkQuantity, "");
         addSinkLine(sinks, "Offset double-bowl sink", offsetDoubleSinkQuantity, "");
         addSinkLine(sinks, "Single-bowl sink", singleBowlSinkQuantity, "");
-        addSinkLine(sinks, "Rectangle vanity sink", rectangleVanitySinkQuantity, vanitySinkColor);
-        addSinkLine(sinks, "Oval vanity sink", ovalVanitySinkQuantity, vanitySinkColor);
-        addSinkLine(sinks, "Customer-picked sink", anotherSinkQuantity, "");
+        addSinkLine(sinks, "Rectangle vanity sink", rectangleVanitySinkQuantity, rectangleVanitySinkColor);
+        addSinkLine(sinks, "Oval vanity sink", ovalVanitySinkQuantity, ovalVanitySinkColor);
+        addSinkLine(sinks, "Customer already has / will provide sink", anotherSinkQuantity, "");
+        addSinkLine(sinks, "Undecided sink", undecidedSinkQuantity, "");
         if (sinks.isEmpty()) return "No sink selected";
         StringBuilder result = new StringBuilder();
         for (String sink : sinks) {
@@ -1568,6 +1628,14 @@ public class MainActivity extends Activity {
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("image/*");
         startActivityForResult(intent, PICK_IMAGE);
+    }
+
+    private void openDrawingPhotoPicker() {
+        hideKeyboard();
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("image/*");
+        startActivityForResult(intent, PICK_DRAWING_IMAGE);
     }
 
     private void takeDrawingPhoto() {
@@ -1749,6 +1817,17 @@ public class MainActivity extends Activity {
             roomPhoto.setImageURI(selectedPhotoUri);
             photoStatus.setText("Photo selected and ready to attach to the email.");
         }
+        if (requestCode == PICK_DRAWING_IMAGE && resultCode == RESULT_OK && data != null && data.getData() != null) {
+            drawingPhotoUri = data.getData();
+            try {
+                int flags = data.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+                getContentResolver().takePersistableUriPermission(drawingPhotoUri, flags);
+            } catch (Exception ignored) {
+            }
+            drawingPhoto.setImageURI(drawingPhotoUri);
+            drawingStatus.setText("Drawing photo ready. Tap the AI button below.");
+            if (analyzeDrawingButton != null) analyzeDrawingButton.setEnabled(true);
+        }
         if (requestCode == TAKE_DRAWING_PHOTO) {
             if (resultCode == RESULT_OK && drawingPhotoUri != null) {
                 drawingPhoto.setImageURI(drawingPhotoUri);
@@ -1909,12 +1988,15 @@ public class MainActivity extends Activity {
         edgeDetail = "Eased and polished";
         sinkSelection = "Not selected";
         vanitySinkColor = "White";
+        rectangleVanitySinkColor = "White";
+        ovalVanitySinkColor = "White";
         equalDoubleSinkQuantity.setText("0");
         offsetDoubleSinkQuantity.setText("0");
         singleBowlSinkQuantity.setText("0");
         rectangleVanitySinkQuantity.setText("0");
         ovalVanitySinkQuantity.setText("0");
         anotherSinkQuantity.setText("0");
+        undecidedSinkQuantity.setText("0");
         aiDrawingSquareFeet = 0;
         aiDrawingConfidence = "";
         aiDrawingExplanation = "";
