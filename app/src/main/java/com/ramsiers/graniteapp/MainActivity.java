@@ -68,6 +68,9 @@ public class MainActivity extends Activity {
     private static final int TAKE_DRAWING_PHOTO = 902;
     private static final int PICK_DRAWING_IMAGE = 903;
     private static final int CAMERA_PERMISSION = 904;
+    private static final int TAKE_COUNTERTOP_PHOTO = 905;
+    private static final int CAMERA_CAPTURE_COUNTERTOP = 1;
+    private static final int CAMERA_CAPTURE_DRAWING = 2;
     private static final String PREFS = "ramsiers_granite_app";
     private static final String MSI_VISUALIZER = "https://www.roomvo.com/my/msi/?product_type=1&multi_product_visualizer=5";
     private static final String DRAWING_AI_ENDPOINT =
@@ -111,6 +114,7 @@ public class MainActivity extends Activity {
 
     private final ArrayList<SlabSelection> slabs = new ArrayList<>();
     private final ArrayList<CounterSection> sections = new ArrayList<>();
+    private final ArrayList<Uri> countertopPhotoUris = new ArrayList<>();
     private final ArrayList<Integer> pageOrder = new ArrayList<>();
     private final ArrayList<CustomPage> customPages = new ArrayList<>();
     private final HashMap<Integer, EditText> customInputs = new HashMap<>();
@@ -184,6 +188,7 @@ public class MainActivity extends Activity {
     private Uri drawingPhotoUri;
     private int stepIndex = 0;
     private int photoAccordionOpen = 0;
+    private int pendingCameraCapture = 0;
     private final Handler addressHandler = new Handler(Looper.getMainLooper());
     private Runnable addressLookupRunnable;
 
@@ -764,14 +769,18 @@ public class MainActivity extends Activity {
         page.addView(questionTitle(questionForEdit(PAGE_PHOTO)));
         addHelp("Tap a section to open it. Opening one closes the other.");
 
-        Button countertopPhoto = accordionButton("Countertop photo", photoAccordionOpen == 1);
+        Button countertopPhoto = accordionButton("Photos of actual countertop", photoAccordionOpen == 1);
         countertopPhoto.setOnClickListener(v -> togglePhotoAccordion(1));
         page.addView(countertopPhoto);
         if (photoAccordionOpen == 1) {
-            Button photoButton = primaryButton("Choose kitchen or countertop photo");
+            addHelp("Add photos of the customer's actual kitchen or countertop. These photos go with the email.");
+            Button cameraButton = primaryButton("Take photo of countertop");
+            cameraButton.setOnClickListener(v -> takeCountertopPhoto());
+            page.addView(cameraButton);
+            Button photoButton = secondaryButton("Choose countertop photo from phone");
             photoButton.setOnClickListener(v -> openPhotoPicker());
             page.addView(photoButton);
-            if (selectedPhotoUri != null) {
+            if (!countertopPhotoUris.isEmpty()) {
                 detach(photoStatus);
                 page.addView(photoStatus);
                 detach(roomPhoto);
@@ -1652,12 +1661,29 @@ public class MainActivity extends Activity {
     }
 
     private void takeDrawingPhoto() {
+        requestCameraCapture(CAMERA_CAPTURE_DRAWING);
+    }
+
+    private void takeCountertopPhoto() {
+        requestCameraCapture(CAMERA_CAPTURE_COUNTERTOP);
+    }
+
+    private void requestCameraCapture(int captureType) {
         hideKeyboard();
+        pendingCameraCapture = captureType;
         if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.CAMERA}, CAMERA_PERMISSION);
             return;
         }
-        openDrawingCamera();
+        openRequestedCamera();
+    }
+
+    private void openRequestedCamera() {
+        if (pendingCameraCapture == CAMERA_CAPTURE_COUNTERTOP) {
+            openCountertopCamera();
+        } else if (pendingCameraCapture == CAMERA_CAPTURE_DRAWING) {
+            openDrawingCamera();
+        }
     }
 
     private void openDrawingCamera() {
@@ -1704,12 +1730,45 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void openCountertopCamera() {
+        try {
+            File photoDirectory = new File(getCacheDir(), "countertop_photos");
+            if (!photoDirectory.exists() && !photoDirectory.mkdirs()) {
+                throw new IllegalStateException("Could not create countertop photo folder");
+            }
+            File photoFile = new File(
+                    photoDirectory,
+                    "countertop-photo-" + System.currentTimeMillis() + ".jpg");
+            selectedPhotoUri = FileProvider.getUriForFile(
+                    this,
+                    getPackageName() + ".fileprovider",
+                    photoFile);
+            Intent camera = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+            camera.putExtra(MediaStore.EXTRA_OUTPUT, selectedPhotoUri);
+            camera.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            camera.setClipData(ClipData.newUri(getContentResolver(), "Countertop photo", selectedPhotoUri));
+            grantCameraUriPermissions(camera, selectedPhotoUri);
+            startActivityForResult(camera, TAKE_COUNTERTOP_PHOTO);
+        } catch (Exception e) {
+            openCountertopCameraWithoutFileOutput();
+        }
+    }
+
+    private void openCountertopCameraWithoutFileOutput() {
+        selectedPhotoUri = null;
+        try {
+            startActivityForResult(new Intent(MediaStore.ACTION_IMAGE_CAPTURE), TAKE_COUNTERTOP_PHOTO);
+        } catch (Exception ignored) {
+            Toast.makeText(this, "The camera could not be opened.", Toast.LENGTH_LONG).show();
+        }
+    }
+
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode != CAMERA_PERMISSION) return;
         if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-            openDrawingCamera();
+            openRequestedCamera();
         } else {
             Toast.makeText(this, "Allow camera access to take a hand drawing photo.", Toast.LENGTH_LONG).show();
         }
@@ -1846,10 +1905,23 @@ public class MainActivity extends Activity {
                 getContentResolver().takePersistableUriPermission(selectedPhotoUri, flags);
             } catch (Exception ignored) {
             }
-            roomPhoto.setImageURI(selectedPhotoUri);
-            photoStatus.setText("Photo selected and ready to attach to the email.");
-            photoAccordionOpen = 1;
-            showStep();
+            addCountertopPhoto(selectedPhotoUri);
+        }
+        if (requestCode == TAKE_COUNTERTOP_PHOTO) {
+            if (resultCode == RESULT_OK && selectedPhotoUri != null) {
+                addCountertopPhoto(selectedPhotoUri);
+            } else if (resultCode == RESULT_OK && data != null && data.getExtras() != null
+                    && data.getExtras().get("data") instanceof Bitmap) {
+                Uri photoUri = saveCameraBitmap(
+                        (Bitmap) data.getExtras().get("data"),
+                        "countertop_photos",
+                        "countertop-photo-");
+                if (photoUri != null) {
+                    addCountertopPhoto(photoUri);
+                } else {
+                    Toast.makeText(this, "The countertop photo could not be saved.", Toast.LENGTH_LONG).show();
+                }
+            }
         }
         if (requestCode == PICK_DRAWING_IMAGE && resultCode == RESULT_OK && data != null && data.getData() != null) {
             drawingPhotoUri = data.getData();
@@ -1873,7 +1945,10 @@ public class MainActivity extends Activity {
                 showStep();
             } else if (resultCode == RESULT_OK && data != null && data.getExtras() != null
                     && data.getExtras().get("data") instanceof Bitmap) {
-                drawingPhotoUri = saveDrawingBitmap((Bitmap) data.getExtras().get("data"));
+                drawingPhotoUri = saveCameraBitmap(
+                        (Bitmap) data.getExtras().get("data"),
+                        "drawing_photos",
+                        "countertop-drawing-");
                 if (drawingPhotoUri != null) {
                     drawingPhoto.setImageURI(drawingPhotoUri);
                     drawingStatus.setText("Drawing photo ready. Tap the AI button below.");
@@ -1892,20 +1967,29 @@ public class MainActivity extends Activity {
         }
     }
 
-    private Uri saveDrawingBitmap(Bitmap bitmap) {
+    private void addCountertopPhoto(Uri photoUri) {
+        selectedPhotoUri = photoUri;
+        if (!countertopPhotoUris.contains(photoUri)) countertopPhotoUris.add(photoUri);
+        roomPhoto.setImageURI(photoUri);
+        photoStatus.setText(countertopPhotoUris.size() + " countertop photo"
+                + (countertopPhotoUris.size() == 1 ? " is" : "s are")
+                + " ready to attach to the email.");
+        photoAccordionOpen = 1;
+        showStep();
+    }
+
+    private Uri saveCameraBitmap(Bitmap bitmap, String folder, String prefix) {
         try {
-            File drawingDirectory = new File(getCacheDir(), "drawing_photos");
-            if (!drawingDirectory.exists() && !drawingDirectory.mkdirs()) return null;
-            File drawingFile = new File(
-                    drawingDirectory,
-                    "countertop-drawing-" + System.currentTimeMillis() + ".jpg");
-            try (java.io.FileOutputStream output = new java.io.FileOutputStream(drawingFile)) {
+            File photoDirectory = new File(getCacheDir(), folder);
+            if (!photoDirectory.exists() && !photoDirectory.mkdirs()) return null;
+            File photoFile = new File(photoDirectory, prefix + System.currentTimeMillis() + ".jpg");
+            try (java.io.FileOutputStream output = new java.io.FileOutputStream(photoFile)) {
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 90, output);
             }
             return FileProvider.getUriForFile(
                     this,
                     getPackageName() + ".fileprovider",
-                    drawingFile);
+                    photoFile);
         } catch (Exception ignored) {
             return null;
         }
@@ -1966,15 +2050,26 @@ public class MainActivity extends Activity {
         body.append("PROJECT NOTES\n").append(text(projectNotes)).append("\n");
 
         Intent email = new Intent(Intent.ACTION_SEND);
-        email.setType(selectedPhotoUri == null ? "text/plain" : "image/*");
+        email.setType(countertopPhotoUris.isEmpty() ? "text/plain" : "image/*");
         if (!to.isEmpty() && to.contains("@")) {
             email.putExtra(Intent.EXTRA_EMAIL, new String[]{to});
         }
         email.putExtra(Intent.EXTRA_SUBJECT, "New countertop quote request - " + text(customerName));
         email.putExtra(Intent.EXTRA_TEXT, body.toString());
-        if (selectedPhotoUri != null) {
-            email.putExtra(Intent.EXTRA_STREAM, selectedPhotoUri);
-            email.setClipData(ClipData.newUri(getContentResolver(), "Countertop photo", selectedPhotoUri));
+        if (!countertopPhotoUris.isEmpty()) {
+            if (countertopPhotoUris.size() == 1) {
+                email.putExtra(Intent.EXTRA_STREAM, countertopPhotoUris.get(0));
+                email.setClipData(ClipData.newUri(
+                        getContentResolver(), "Countertop photo", countertopPhotoUris.get(0)));
+            } else {
+                email.setAction(Intent.ACTION_SEND_MULTIPLE);
+                email.putParcelableArrayListExtra(Intent.EXTRA_STREAM, new ArrayList<>(countertopPhotoUris));
+                ClipData photoData = ClipData.newRawUri("Countertop photos", countertopPhotoUris.get(0));
+                for (int i = 1; i < countertopPhotoUris.size(); i++) {
+                    photoData.addItem(new ClipData.Item(countertopPhotoUris.get(i)));
+                }
+                email.setClipData(photoData);
+            }
             email.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         }
         try {
@@ -1997,6 +2092,7 @@ public class MainActivity extends Activity {
         slabs.clear();
         sections.clear();
         selectedPhotoUri = null;
+        countertopPhotoUris.clear();
         drawingPhotoUri = null;
         customerName.setText("");
         customerPhone.setText("");
