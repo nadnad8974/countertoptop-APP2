@@ -859,6 +859,7 @@ public class MainActivity extends Activity {
                                 : "Units: " + units + ".";
                         drawingVerificationStatus.setText(
                                 unitMessage
+                                        + " Tan strips are backsplash pieces."
                                         + " Compare this redraw with the original above before accepting the square footage.");
                     } else {
                         verificationDrawingView.clearDrawing();
@@ -3293,21 +3294,27 @@ public class MainActivity extends Activity {
             canvas.save();
             canvas.translate(left, top);
             canvas.scale(scale, scale);
-            drawShapes(canvas, verificationDrawing.optJSONArray("shapes"));
-            drawDimensions(canvas, verificationDrawing.optJSONArray("dimensions"));
+            JSONArray shapes = verificationDrawing.optJSONArray("shapes");
+            drawShapes(canvas, shapes);
+            drawDimensions(canvas, verificationDrawing.optJSONArray("dimensions"), shapes);
             canvas.restore();
         }
 
         private void drawShapes(Canvas canvas, JSONArray shapes) {
             if (shapes == null) return;
-            for (int pass = 0; pass < 2; pass++) {
-                boolean openingsOnly = pass == 1;
+            // Keep narrow backsplash strips above countertops, then restore openings on top.
+            // Their 4-inch thickness can otherwise be completely covered by a countertop.
+            for (int pass = 0; pass < 3; pass++) {
                 for (int i = 0; i < Math.min(shapes.length(), 24); i++) {
                     JSONObject shape = shapes.optJSONObject(i);
                     if (shape == null) continue;
-                    boolean isOpening = "opening".equals(
-                            shape.optString("kind", "countertop"));
-                    if (isOpening != openingsOnly) continue;
+                    String kind = shape.optString("kind", "countertop");
+                    boolean drawInThisPass = pass == 0
+                            ? !"opening".equals(kind) && !"backsplash".equals(kind)
+                            : pass == 1
+                            ? "backsplash".equals(kind)
+                            : "opening".equals(kind);
+                    if (!drawInThisPass) continue;
                     drawShape(canvas, shape);
                 }
             }
@@ -3339,25 +3346,28 @@ public class MainActivity extends Activity {
 
             String kind = shape.optString("kind", "countertop");
             if ("backsplash".equals(kind)) {
-                fillPaint.setColor(Color.rgb(224, 188, 132));
+                fillPaint.setColor(Color.rgb(211, 157, 73));
             } else if ("opening".equals(kind)) {
                 fillPaint.setColor(Color.WHITE);
             } else {
                 fillPaint.setColor(Color.rgb(239, 230, 220));
             }
             linePaint.setColor(Color.rgb(91, 58, 41));
-            linePaint.setStrokeWidth("opening".equals(kind) ? 5f : 4f);
+            linePaint.setStrokeWidth(
+                    "backsplash".equals(kind) ? 6f : "opening".equals(kind) ? 5f : 4f);
             canvas.drawPath(path, fillPaint);
             canvas.drawPath(path, linePaint);
 
             String label = shape.optString("label", "").trim();
-            if (!label.isEmpty()) {
-                textPaint.setTextSize(38f);
+            // Do not put an opaque label box over a thin backsplash. Its dimension arrows and
+            // the tan legend identify it without hiding the actual piece.
+            if (!label.isEmpty() && !"backsplash".equals(kind)) {
+                textPaint.setTextSize(32f);
                 drawTextWithBackground(canvas, label, centerX, centerY + 13f);
             }
         }
 
-        private void drawDimensions(Canvas canvas, JSONArray dimensions) {
+        private void drawDimensions(Canvas canvas, JSONArray dimensions, JSONArray shapes) {
             if (dimensions == null) return;
             linePaint.setColor(Color.rgb(25, 25, 25));
             linePaint.setStrokeWidth(3f);
@@ -3378,16 +3388,93 @@ public class MainActivity extends Activity {
 
                 String label = dimension.optString("label", "").trim();
                 if (!label.isEmpty()) {
-                    textPaint.setTextSize(40f);
+                    textPaint.setTextSize(34f);
                     float normalX = -dy / length;
                     float normalY = dx / length;
+                    float midpointX = (x1 + x2) / 2f;
+                    float midpointY = (y1 + y2) / 2f;
+                    float positiveX = midpointX + normalX * 25f;
+                    float positiveY = midpointY + normalY * 25f;
+                    float negativeX = midpointX - normalX * 25f;
+                    float negativeY = midpointY - normalY * 25f;
+                    float[] nearestShapeCenter = nearestShapeCenter(midpointX, midpointY, shapes);
+                    float positiveDistance = distanceSquared(
+                            positiveX,
+                            positiveY,
+                            nearestShapeCenter[0],
+                            nearestShapeCenter[1]);
+                    float negativeDistance = distanceSquared(
+                            negativeX,
+                            negativeY,
+                            nearestShapeCenter[0],
+                            nearestShapeCenter[1]);
+                    float labelX = positiveDistance >= negativeDistance ? positiveX : negativeX;
+                    float labelY = positiveDistance >= negativeDistance ? positiveY : negativeY;
                     drawTextWithBackground(
                             canvas,
                             label,
-                            (x1 + x2) / 2f + normalX * 25f,
-                            (y1 + y2) / 2f + normalY * 25f + 13f);
+                            labelX,
+                            labelY + 12f);
                 }
             }
+        }
+
+        private float[] nearestShapeCenter(float x, float y, JSONArray shapes) {
+            float nearestCenterX = DEFAULT_CANVAS_WIDTH / 2f;
+            float nearestCenterY = DEFAULT_CANVAS_HEIGHT / 2f;
+            float nearestDistance = Float.MAX_VALUE;
+            if (shapes == null) return new float[]{nearestCenterX, nearestCenterY};
+
+            for (int shapeIndex = 0; shapeIndex < Math.min(shapes.length(), 24); shapeIndex++) {
+                JSONObject shape = shapes.optJSONObject(shapeIndex);
+                if (shape == null) continue;
+                JSONArray points = shape.optJSONArray("points");
+                if (points == null || points.length() < 3) continue;
+
+                float minimumX = DEFAULT_CANVAS_WIDTH;
+                float minimumY = DEFAULT_CANVAS_HEIGHT;
+                float maximumX = 0f;
+                float maximumY = 0f;
+                boolean hasPoint = false;
+                for (int pointIndex = 0; pointIndex < Math.min(points.length(), 16); pointIndex++) {
+                    JSONObject point = points.optJSONObject(pointIndex);
+                    if (point == null) continue;
+                    float pointX = clamp(
+                            (float) point.optDouble("x", 0),
+                            0,
+                            DEFAULT_CANVAS_WIDTH);
+                    float pointY = clamp(
+                            (float) point.optDouble("y", 0),
+                            0,
+                            DEFAULT_CANVAS_HEIGHT);
+                    minimumX = Math.min(minimumX, pointX);
+                    minimumY = Math.min(minimumY, pointY);
+                    maximumX = Math.max(maximumX, pointX);
+                    maximumY = Math.max(maximumY, pointY);
+                    hasPoint = true;
+                }
+                if (!hasPoint) continue;
+
+                float nearestX = clamp(x, minimumX, maximumX);
+                float nearestY = clamp(y, minimumY, maximumY);
+                float boundsDistance = distanceSquared(x, y, nearestX, nearestY);
+                if (boundsDistance < nearestDistance) {
+                    nearestDistance = boundsDistance;
+                    nearestCenterX = (minimumX + maximumX) / 2f;
+                    nearestCenterY = (minimumY + maximumY) / 2f;
+                }
+            }
+            return new float[]{nearestCenterX, nearestCenterY};
+        }
+
+        private static float distanceSquared(
+                float x1,
+                float y1,
+                float x2,
+                float y2) {
+            float dx = x1 - x2;
+            float dy = y1 - y2;
+            return dx * dx + dy * dy;
         }
 
         private void drawArrow(
@@ -3413,7 +3500,19 @@ public class MainActivity extends Activity {
                 float baselineY) {
             String text = value.length() > 60 ? value.substring(0, 60) : value;
             float width = textPaint.measureText(text);
+            while (width > DEFAULT_CANVAS_WIDTH - 20f && text.length() > 4) {
+                text = text.substring(0, text.length() - 2).trim() + "…";
+                width = textPaint.measureText(text);
+            }
             Paint.FontMetrics metrics = textPaint.getFontMetrics();
+            centerX = clamp(
+                    centerX,
+                    width / 2f + 10f,
+                    DEFAULT_CANVAS_WIDTH - width / 2f - 10f);
+            baselineY = clamp(
+                    baselineY,
+                    10f - metrics.top,
+                    DEFAULT_CANVAS_HEIGHT - 10f - metrics.bottom);
             RectF background = new RectF(
                     centerX - width / 2f - 7f,
                     baselineY + metrics.top - 4f,
