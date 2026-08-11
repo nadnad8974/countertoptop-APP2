@@ -39,6 +39,7 @@ import android.view.ScaleGestureDetector;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
+import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.ArrayAdapter;
 import android.widget.AutoCompleteTextView;
@@ -139,6 +140,7 @@ public class MainActivity extends Activity {
     private LinearLayout navigation;
     private LinearLayout slabList;
     private LinearLayout sectionList;
+    private LinearLayout manualMeasurementList;
 
     private EditText customerName;
     private EditText customerPhone;
@@ -202,15 +204,20 @@ public class MainActivity extends Activity {
     private TextView drawingStatus;
     private TextView drawingProgressText;
     private TextView drawingVerificationStatus;
+    private TextView manualMeasurementTotal;
     private ImageView roomPhoto;
     private ImageView drawingPhoto;
     private ProgressBar drawingProgressBar;
     private VerificationDrawingView verificationDrawingView;
     private Button analyzeDrawingButton;
+    private EditText pendingManualLength;
+    private EditText pendingManualWidth;
     private Uri selectedPhotoUri;
     private Uri drawingPhotoUri;
     private int stepIndex = 0;
-    private int photoAccordionOpen = 2;
+    private int photoAccordionOpen = 0;
+    private boolean renderingManualMeasurements;
+    private boolean manualPendingCommitted;
     private int pendingCameraCapture = 0;
     private final Handler addressHandler = new Handler(Looper.getMainLooper());
     private final Handler drawingProgressHandler = new Handler(Looper.getMainLooper());
@@ -302,6 +309,10 @@ public class MainActivity extends Activity {
         sectionList = new LinearLayout(this);
         sectionList.setOrientation(LinearLayout.VERTICAL);
 
+        manualMeasurementList = new LinearLayout(this);
+        manualMeasurementList.setOrientation(LinearLayout.VERTICAL);
+        manualMeasurementTotal = resultLabel("Manual measurement total: 0.00 sq ft");
+
         stoveLength = input("Leave blank if there is no opening", decimalInput());
         stoveWidth = input("Leave blank if there is no opening", decimalInput());
         pricePerSqFt = input("Installed price per square foot", decimalInput());
@@ -349,7 +360,7 @@ public class MainActivity extends Activity {
         drawingPhoto.setScaleType(ImageView.ScaleType.FIT_CENTER);
         drawingPhoto.setBackgroundColor(Color.WHITE);
         drawingPhoto.setContentDescription("Original countertop drawing. Tap to zoom.");
-        drawingPhoto.setOnClickListener(v -> showDrawingZoom(false));
+        drawingPhoto.setOnClickListener(v -> showDrawingZoom());
         drawingProgressBar = new ProgressBar(
                 this,
                 null,
@@ -366,7 +377,7 @@ public class MainActivity extends Activity {
         drawingVerificationStatus.setGravity(Gravity.CENTER);
         drawingVerificationStatus.setVisibility(View.GONE);
         verificationDrawingView = new VerificationDrawingView(this);
-        verificationDrawingView.setOnClickListener(v -> showDrawingZoom(true));
+        verificationDrawingView.setOnClickListener(v -> showDrawingZoom());
         verificationDrawingView.setVisibility(View.GONE);
 
         setContentView(screen);
@@ -846,7 +857,7 @@ public class MainActivity extends Activity {
         page.addView(drawingPlan);
         if (photoAccordionOpen == 2) {
             addHelp("Make sure every dimension and its unit can be read clearly.");
-            Button drawingButton = primaryButton("Take a picture of a drawing");
+            Button drawingButton = secondaryButton("Take a picture of a drawing");
             drawingButton.setOnClickListener(v -> takeDrawingPhoto());
             page.addView(drawingButton);
 
@@ -859,7 +870,7 @@ public class MainActivity extends Activity {
                 detach(drawingPhoto);
                 page.addView(drawingPhoto, new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT, dp(300)));
-                addHelp("Tap either picture to open it. Pinch to zoom, drag to move, or double-tap to reset.");
+                addHelp("Tap either picture to compare both at the same time. Pinch or drag each picture separately, or double-tap it to reset.");
 
                 if (!aiDrawingConfidence.isEmpty()) {
                     page.addView(sectionHeader("AI verification redraw — compare every dimension"));
@@ -906,6 +917,19 @@ public class MainActivity extends Activity {
             }
         }
 
+        Button manualMeasurement = accordionButton("Manual Measurement", photoAccordionOpen == 3);
+        manualMeasurement.setOnClickListener(v -> togglePhotoAccordion(3));
+        page.addView(manualMeasurement);
+        if (photoAccordionOpen == 3) {
+            addHelp("Enter each piece in inches. Square footage is length × width ÷ 144. Finish the width field and the next blank piece will appear automatically.");
+            detach(manualMeasurementList);
+            page.addView(manualMeasurementList);
+            detach(manualMeasurementTotal);
+            page.addView(manualMeasurementTotal);
+            renderManualMeasurements(false);
+            addHelp("The manual measurement total is used for the quote instead of the AI estimate whenever at least one manual piece has been entered.");
+        }
+
         Button countertopPhoto = accordionButton("Photos of actual countertop", photoAccordionOpen == 1);
         countertopPhoto.setOnClickListener(v -> togglePhotoAccordion(1));
         page.addView(countertopPhoto);
@@ -924,18 +948,234 @@ public class MainActivity extends Activity {
                 page.addView(roomPhoto, new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT, dp(220)));
             }
-        }
 
-        Button visualizer = secondaryButton("Open MSI room visualizer");
-        visualizer.setOnClickListener(v -> openWebPage(MSI_VISUALIZER));
-        page.addView(visualizer);
+            Button visualizer = secondaryButton("Open MSI room visualizer");
+            visualizer.setOnClickListener(v -> openWebPage(MSI_VISUALIZER));
+            page.addView(visualizer);
+        }
         addHelp("You may skip this page and tap Next.");
         addInlineNavigation();
     }
 
     private void togglePhotoAccordion(int section) {
+        if (photoAccordionOpen == 3) commitPendingManualMeasurement(false);
         photoAccordionOpen = photoAccordionOpen == section ? 0 : section;
         showStep();
+    }
+
+    private void renderManualMeasurements(boolean focusNewPiece) {
+        if (manualMeasurementList == null) return;
+        renderingManualMeasurements = true;
+        manualMeasurementList.removeAllViews();
+
+        for (int i = 0; i < sections.size(); i++) {
+            addManualMeasurementRow(i, sections.get(i));
+        }
+
+        addBlankManualMeasurementRow();
+        renderingManualMeasurements = false;
+        updateManualMeasurementTotal(0);
+
+        if (focusNewPiece && pendingManualLength != null) {
+            EditText field = pendingManualLength;
+            field.postDelayed(() -> {
+                if (photoAccordionOpen != 3 || field != pendingManualLength) return;
+                field.requestFocus();
+                showKeyboard(field);
+            }, 120);
+        }
+    }
+
+    private void addManualMeasurementRow(int index, CounterSection section) {
+        LinearLayout row = itemRow();
+        row.setOrientation(LinearLayout.VERTICAL);
+
+        LinearLayout heading = new LinearLayout(this);
+        heading.setOrientation(LinearLayout.HORIZONTAL);
+        heading.setGravity(Gravity.CENTER_VERTICAL);
+        TextView title = label("Piece " + (index + 1));
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        heading.addView(title, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        Button remove = miniButton("DELETE");
+        remove.setOnClickListener(v -> {
+            sections.remove(index);
+            renumberGeneratedManualPieces();
+            saveLists();
+            renderManualMeasurements(false);
+            renderSections();
+            calculateAndDisplay(false);
+        });
+        heading.addView(remove);
+        row.addView(heading, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        EditText length = input("Length in inches", decimalInput());
+        EditText width = input("Width in inches", decimalInput());
+        length.setText(measurementValue(section.length));
+        width.setText(measurementValue(section.width));
+        length.setImeOptions(EditorInfo.IME_ACTION_NEXT);
+        width.setImeOptions(EditorInfo.IME_ACTION_DONE);
+        TextView result = label(manualPieceResult(section.length, section.width, section.quantity));
+        result.setTypeface(Typeface.DEFAULT_BOLD);
+
+        TextWatcher watcher = new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override public void afterTextChanged(Editable s) {
+                if (renderingManualMeasurements || index >= sections.size()) return;
+                double enteredLength = value(length);
+                double enteredWidth = value(width);
+                CounterSection current = sections.get(index);
+                CounterSection updated = new CounterSection(
+                        current.name,
+                        enteredLength,
+                        enteredWidth,
+                        current.quantity);
+                sections.set(index, updated);
+                result.setText(manualPieceResult(
+                        updated.length,
+                        updated.width,
+                        updated.quantity));
+                saveLists();
+                renderSections();
+                updateManualMeasurementTotal(0);
+                calculateAndDisplay(false);
+            }
+        };
+        length.addTextChangedListener(watcher);
+        width.addTextChangedListener(watcher);
+
+        row.addView(length);
+        row.addView(width);
+        row.addView(result);
+        if (section.quantity != 1) {
+            TextView savedQuantity = label(
+                    "Saved quantity: " + measurementValue(section.quantity));
+            savedQuantity.setTextSize(13);
+            savedQuantity.setTextColor(Color.GRAY);
+            row.addView(savedQuantity);
+        }
+        manualMeasurementList.addView(row);
+    }
+
+    private void addBlankManualMeasurementRow() {
+        LinearLayout row = itemRow();
+        row.setOrientation(LinearLayout.VERTICAL);
+
+        TextView title = label("Piece " + (sections.size() + 1));
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        row.addView(title);
+
+        EditText length = input("Length in inches", decimalInput());
+        EditText width = input("Width in inches", decimalInput());
+        length.setImeOptions(EditorInfo.IME_ACTION_NEXT);
+        width.setImeOptions(EditorInfo.IME_ACTION_NEXT);
+        TextView result = label("Piece square footage: 0.00 sq ft");
+        result.setTypeface(Typeface.DEFAULT_BOLD);
+        pendingManualLength = length;
+        pendingManualWidth = width;
+        manualPendingCommitted = false;
+
+        TextWatcher previewWatcher = new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override public void afterTextChanged(Editable s) {
+                if (renderingManualMeasurements || manualPendingCommitted) return;
+                double enteredLength = value(length);
+                double enteredWidth = value(width);
+                double pendingSquareFeet = (enteredLength * enteredWidth) / 144.0;
+                result.setText(manualPieceResult(enteredLength, enteredWidth, 1));
+                updateManualMeasurementTotal(pendingSquareFeet);
+            }
+        };
+        length.addTextChangedListener(previewWatcher);
+        width.addTextChangedListener(previewWatcher);
+        width.setOnEditorActionListener((view, actionId, event) -> {
+            if (actionId == EditorInfo.IME_ACTION_DONE
+                    || actionId == EditorInfo.IME_ACTION_NEXT
+                    || actionId == EditorInfo.IME_ACTION_UNSPECIFIED) {
+                return commitPendingManualMeasurement(true);
+            }
+            return false;
+        });
+        View.OnFocusChangeListener finishPieceOnBlur = (view, hasFocus) -> {
+            if (!hasFocus) commitPendingManualMeasurement(false);
+        };
+        length.setOnFocusChangeListener(finishPieceOnBlur);
+        width.setOnFocusChangeListener(finishPieceOnBlur);
+
+        row.addView(length);
+        row.addView(width);
+        row.addView(result);
+        manualMeasurementList.addView(row);
+    }
+
+    private boolean commitPendingManualMeasurement(boolean focusNewPiece) {
+        if (manualPendingCommitted || pendingManualLength == null || pendingManualWidth == null) {
+            return false;
+        }
+        double enteredLength = value(pendingManualLength);
+        double enteredWidth = value(pendingManualWidth);
+        if (enteredLength <= 0 || enteredWidth <= 0) return false;
+
+        manualPendingCommitted = true;
+        sections.add(new CounterSection(
+                "Piece " + (sections.size() + 1),
+                enteredLength,
+                enteredWidth,
+                1));
+        saveLists();
+        renderSections();
+        calculateAndDisplay(false);
+        if (manualMeasurementList != null) {
+            manualMeasurementList.post(() -> {
+                if (photoAccordionOpen == 3 && currentPageId() == PAGE_PHOTO) {
+                    renderManualMeasurements(focusNewPiece);
+                }
+            });
+        }
+        return true;
+    }
+
+    private void updateManualMeasurementTotal(double pendingSquareFeet) {
+        if (manualMeasurementTotal == null) return;
+        double total = pendingSquareFeet;
+        for (CounterSection section : sections) total += section.squareFeet();
+        manualMeasurementTotal.setText(
+                "Manual measurement total: " + number.format(total) + " sq ft");
+    }
+
+    private String manualPieceResult(double length, double width, double quantity) {
+        String quantityPart = quantity == 1
+                ? ""
+                : " × " + measurementValue(quantity);
+        return "Piece square footage: "
+                + measurementValue(length)
+                + " × " + measurementValue(width)
+                + quantityPart
+                + " ÷ 144 = "
+                + number.format((length * width * quantity) / 144.0)
+                + " sq ft";
+    }
+
+    private void renumberGeneratedManualPieces() {
+        for (int i = 0; i < sections.size(); i++) {
+            CounterSection section = sections.get(i);
+            if (section.name.matches("Piece \\d+")) {
+                sections.set(i, new CounterSection(
+                        "Piece " + (i + 1),
+                        section.length,
+                        section.width,
+                        section.quantity));
+            }
+        }
+    }
+
+    private String measurementValue(double value) {
+        if (value == Math.rint(value)) return String.valueOf((long) value);
+        return number.format(value);
     }
 
     private void addReviewStep() {
@@ -984,6 +1224,7 @@ public class MainActivity extends Activity {
         Button back = secondaryButton("Back");
         back.setEnabled(stepIndex > 0);
         back.setOnClickListener(v -> {
+            if (currentPageId() == PAGE_PHOTO) commitPendingManualMeasurement(false);
             hideKeyboard();
             stepIndex = Math.max(0, stepIndex - 1);
             showStep();
@@ -1006,6 +1247,7 @@ public class MainActivity extends Activity {
         Button back = secondaryButton("Back");
         back.setEnabled(stepIndex > 0);
         back.setOnClickListener(v -> {
+            if (currentPageId() == PAGE_PHOTO) commitPendingManualMeasurement(false);
             hideKeyboard();
             stepIndex = Math.max(0, stepIndex - 1);
             showStep();
@@ -1031,6 +1273,7 @@ public class MainActivity extends Activity {
 
     private void handleNext() {
         int pageId = currentPageId();
+        if (pageId == PAGE_PHOTO) commitPendingManualMeasurement(false);
         if (pageId == PAGE_NAME && customerName.getText().toString().trim().isEmpty()) {
             Toast.makeText(this, "Enter the customer's name.", Toast.LENGTH_SHORT).show();
             customerName.requestFocus();
@@ -1626,6 +1869,7 @@ public class MainActivity extends Activity {
             Button remove = miniButton("REMOVE");
             remove.setOnClickListener(v -> {
                 sections.remove(index);
+                renumberGeneratedManualPieces();
                 saveLists();
                 renderSections();
                 calculateAndDisplay(false);
@@ -2187,14 +2431,10 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void showDrawingZoom(boolean verificationRedraw) {
-        if (verificationRedraw && aiVerificationDrawing == null) {
-            Toast.makeText(this, "No AI redraw is available yet.", Toast.LENGTH_SHORT).show();
-            return;
-        }
+    private void showDrawingZoom() {
         Drawable originalDrawable = drawingPhoto.getDrawable();
-        if (!verificationRedraw && originalDrawable == null) {
-            Toast.makeText(this, "No original drawing is available yet.", Toast.LENGTH_SHORT).show();
+        if (originalDrawable == null && aiVerificationDrawing == null) {
+            Toast.makeText(this, "No drawings are available yet.", Toast.LENGTH_SHORT).show();
             return;
         }
         if (drawingZoomDialog != null) drawingZoomDialog.dismiss();
@@ -2213,16 +2453,16 @@ public class MainActivity extends Activity {
         controls.setBackgroundColor(Color.rgb(91, 58, 41));
 
         TextView title = new TextView(this);
-        title.setText(verificationRedraw ? "AI verification redraw" : "Original drawing");
+        title.setText("Compare drawings");
         title.setTextColor(Color.WHITE);
         title.setTextSize(18);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         controls.addView(title, new LinearLayout.LayoutParams(0, dp(48), 1f));
 
         Button reset = new Button(this);
-        reset.setText("Reset");
+        reset.setText("Reset both");
         reset.setAllCaps(false);
-        controls.addView(reset, new LinearLayout.LayoutParams(dp(82), dp(48)));
+        controls.addView(reset, new LinearLayout.LayoutParams(dp(100), dp(48)));
 
         Button close = new Button(this);
         close.setText("Close");
@@ -2232,32 +2472,56 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        ZoomPanFrame zoomFrame = new ZoomPanFrame(this);
-        if (verificationRedraw) {
-            VerificationDrawingView enlargedRedraw = new VerificationDrawingView(this);
-            enlargedRedraw.setVerificationDrawing(aiVerificationDrawing);
-            zoomFrame.setZoomContent(enlargedRedraw);
-        } else {
+        TextView instructions = new TextView(this);
+        instructions.setText("Pinch or drag either picture separately");
+        instructions.setTextColor(Color.WHITE);
+        instructions.setTextSize(13);
+        instructions.setGravity(Gravity.CENTER);
+        instructions.setPadding(dp(8), dp(5), dp(8), dp(5));
+        root.addView(instructions, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        ArrayList<ZoomPanFrame> zoomFrames = new ArrayList<>();
+        if (originalDrawable != null) {
+            root.addView(comparisonDrawingLabel("Original drawing"));
+            ZoomPanFrame originalZoomFrame = new ZoomPanFrame(this);
             ImageView enlargedOriginal = new ImageView(this);
             enlargedOriginal.setScaleType(ImageView.ScaleType.FIT_CENTER);
-            enlargedOriginal.setBackgroundColor(Color.BLACK);
+            enlargedOriginal.setBackgroundColor(Color.WHITE);
             Drawable zoomDrawable = originalDrawable;
             if (originalDrawable.getConstantState() != null) {
-                zoomDrawable = originalDrawable.getConstantState().newDrawable(getResources());
+                zoomDrawable = originalDrawable.getConstantState().newDrawable(getResources()).mutate();
             }
             enlargedOriginal.setImageDrawable(zoomDrawable);
             enlargedOriginal.setContentDescription("Enlarged original countertop drawing");
-            zoomFrame.setZoomContent(enlargedOriginal);
+            originalZoomFrame.setZoomContent(enlargedOriginal);
+            zoomFrames.add(originalZoomFrame);
+            root.addView(originalZoomFrame, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    0,
+                    1f));
         }
-        root.addView(zoomFrame, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                0,
-                1f));
 
-        reset.setOnClickListener(v -> zoomFrame.resetZoom());
+        if (aiVerificationDrawing != null) {
+            root.addView(comparisonDrawingLabel("AI verification redraw — verify every dimension"));
+            ZoomPanFrame redrawZoomFrame = new ZoomPanFrame(this);
+            VerificationDrawingView enlargedRedraw = new VerificationDrawingView(this);
+            enlargedRedraw.setVerificationDrawing(aiVerificationDrawing);
+            redrawZoomFrame.setZoomContent(enlargedRedraw);
+            zoomFrames.add(redrawZoomFrame);
+            root.addView(redrawZoomFrame, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    0,
+                    1f));
+        }
+
+        reset.setOnClickListener(v -> {
+            for (ZoomPanFrame zoomFrame : zoomFrames) zoomFrame.resetZoom();
+        });
         close.setOnClickListener(v -> dialog.dismiss());
         dialog.setOnDismissListener(ignored -> {
-            zoomFrame.removeAllViews();
+            for (ZoomPanFrame zoomFrame : zoomFrames) zoomFrame.removeAllViews();
             if (drawingZoomDialog == dialog) drawingZoomDialog = null;
         });
         dialog.setContentView(root);
@@ -2270,6 +2534,21 @@ public class MainActivity extends Activity {
                     ViewGroup.LayoutParams.MATCH_PARENT);
         }
         drawingZoomDialog = dialog;
+    }
+
+    private TextView comparisonDrawingLabel(String text) {
+        TextView label = new TextView(this);
+        label.setText(text);
+        label.setTextColor(Color.WHITE);
+        label.setTextSize(14);
+        label.setTypeface(Typeface.DEFAULT_BOLD);
+        label.setGravity(Gravity.CENTER);
+        label.setBackgroundColor(Color.rgb(91, 58, 41));
+        label.setPadding(dp(8), dp(5), dp(8), dp(5));
+        label.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+        return label;
     }
 
     private void showDrawingResult(
@@ -2571,7 +2850,7 @@ public class MainActivity extends Activity {
         drawingPhoto.setImageDrawable(null);
         photoStatus.setText("No photo selected.");
         drawingStatus.setText("No countertop drawing selected.");
-        photoAccordionOpen = 2;
+        photoAccordionOpen = 0;
         squareFootResult.setText("Net square footage: 0.00");
         totalResult.setText("Estimated total: $0.00");
         stepIndex = 0;
