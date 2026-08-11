@@ -80,7 +80,7 @@ public class MainActivity extends Activity {
     private static final String PRICE_FAUCET = "price_faucet";
     private static final String PRICE_BASKET = "price_basket";
     private static final String PRICE_GRID = "price_grid";
-    private static final String DEFAULT_PAGE_ORDER = "0,1,2,3,8,13,15,16,17,20,14,18,19,11,12,6,4";
+    private static final String DEFAULT_PAGE_ORDER = "0,1,2,3,12,8,13,15,16,17,20,14,18,19,11,6,4";
     private static final String ALL_BUILT_IN_PAGES = "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,100,101,102,103,104,105,106";
     private static final int CUSTOM_PAGE_START = 1000;
     private static final int PAGE_NAME = 0;
@@ -187,7 +187,7 @@ public class MainActivity extends Activity {
     private Uri selectedPhotoUri;
     private Uri drawingPhotoUri;
     private int stepIndex = 0;
-    private int photoAccordionOpen = 0;
+    private int photoAccordionOpen = 2;
     private int pendingCameraCapture = 0;
     private final Handler addressHandler = new Handler(Looper.getMainLooper());
     private Runnable addressLookupRunnable;
@@ -291,7 +291,7 @@ public class MainActivity extends Activity {
         roomPhoto = new ImageView(this);
         roomPhoto.setAdjustViewBounds(true);
         roomPhoto.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        drawingStatus = label("No hand drawing photo selected.");
+        drawingStatus = label("No countertop drawing selected.");
         drawingStatus.setTextSize(14);
         drawingPhoto = new ImageView(this);
         drawingPhoto.setAdjustViewBounds(true);
@@ -767,7 +767,34 @@ public class MainActivity extends Activity {
         hideKeyboard();
         page.clearFocus();
         page.addView(questionTitle(questionForEdit(PAGE_PHOTO)));
-        addHelp("Tap a section to open it. Opening one closes the other.");
+        addHelp("Upload a hand-drawn sketch, a 20/20 software drawing, or any clear countertop drawing. AI will estimate the square footage.");
+
+        Button drawingPlan = accordionButton("Countertop drawing for AI", photoAccordionOpen == 2);
+        drawingPlan.setOnClickListener(v -> togglePhotoAccordion(2));
+        page.addView(drawingPlan);
+        if (photoAccordionOpen == 2) {
+            addHelp("Make sure every dimension and its unit can be read clearly.");
+            Button drawingButton = primaryButton("Take a picture of a drawing");
+            drawingButton.setOnClickListener(v -> takeDrawingPhoto());
+            page.addView(drawingButton);
+
+            Button drawingUploadButton = secondaryButton("Choose a drawing from phone");
+            drawingUploadButton.setOnClickListener(v -> openDrawingPhotoPicker());
+            page.addView(drawingUploadButton);
+
+            if (drawingPhotoUri != null) {
+                detach(drawingStatus);
+                page.addView(drawingStatus);
+                detach(drawingPhoto);
+                page.addView(drawingPhoto, new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, dp(220)));
+                analyzeDrawingButton = primaryButton("Figure square footage with AI");
+                analyzeDrawingButton.setEnabled(true);
+                analyzeDrawingButton.setOnClickListener(v -> analyzeDrawing());
+                page.addView(analyzeDrawingButton);
+                addHelp("AI estimate only. Verify every dimension before using it for a price.");
+            }
+        }
 
         Button countertopPhoto = accordionButton("Photos of actual countertop", photoAccordionOpen == 1);
         countertopPhoto.setOnClickListener(v -> togglePhotoAccordion(1));
@@ -789,37 +816,10 @@ public class MainActivity extends Activity {
             }
         }
 
-        Button drawingPlan = accordionButton("Hand-drawn countertop plan", photoAccordionOpen == 2);
-        drawingPlan.setOnClickListener(v -> togglePhotoAccordion(2));
-        page.addView(drawingPlan);
-        if (photoAccordionOpen == 2) {
-            addHelp("Take a clear, straight picture that shows every dimension and its unit.");
-            Button drawingButton = primaryButton("Take picture of hand drawing");
-            drawingButton.setOnClickListener(v -> takeDrawingPhoto());
-            page.addView(drawingButton);
-
-            Button drawingUploadButton = secondaryButton("Choose hand drawing photo from phone");
-            drawingUploadButton.setOnClickListener(v -> openDrawingPhotoPicker());
-            page.addView(drawingUploadButton);
-
-            if (drawingPhotoUri != null) {
-                detach(drawingStatus);
-                page.addView(drawingStatus);
-                detach(drawingPhoto);
-                page.addView(drawingPhoto, new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, dp(220)));
-                analyzeDrawingButton = primaryButton("Figure square footage with AI");
-                analyzeDrawingButton.setEnabled(true);
-                analyzeDrawingButton.setOnClickListener(v -> analyzeDrawing());
-                page.addView(analyzeDrawingButton);
-                addHelp("AI estimate only. Verify every dimension before using it for a price.");
-            }
-        }
-
         Button visualizer = secondaryButton("Open MSI room visualizer");
         visualizer.setOnClickListener(v -> openWebPage(MSI_VISUALIZER));
         page.addView(visualizer);
-        addHelp("You may skip the photo and tap Next.");
+        addHelp("You may skip this page and tap Next.");
         addInlineNavigation();
     }
 
@@ -1702,7 +1702,7 @@ public class MainActivity extends Activity {
             Intent camera = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
             camera.putExtra(MediaStore.EXTRA_OUTPUT, drawingPhotoUri);
             camera.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-            camera.setClipData(ClipData.newUri(getContentResolver(), "Hand drawing", drawingPhotoUri));
+            camera.setClipData(ClipData.newUri(getContentResolver(), "Countertop drawing", drawingPhotoUri));
             grantCameraUriPermissions(camera, drawingPhotoUri);
             startActivityForResult(camera, TAKE_DRAWING_PHOTO);
         } catch (Exception e) {
@@ -1770,13 +1770,13 @@ public class MainActivity extends Activity {
         if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
             openRequestedCamera();
         } else {
-            Toast.makeText(this, "Allow camera access to take a hand drawing photo.", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "Allow camera access to take photos.", Toast.LENGTH_LONG).show();
         }
     }
 
     private void analyzeDrawing() {
         if (drawingPhotoUri == null) {
-            Toast.makeText(this, "Take a picture of the hand drawing first.", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "Take or choose a countertop drawing first.", Toast.LENGTH_LONG).show();
             return;
         }
         analyzeDrawingButton.setEnabled(false);
@@ -1961,7 +1961,7 @@ public class MainActivity extends Activity {
                 }
             } else {
                 drawingPhotoUri = null;
-                drawingStatus.setText("No hand drawing photo selected.");
+                drawingStatus.setText("No countertop drawing selected.");
                 if (analyzeDrawingButton != null) analyzeDrawingButton.setEnabled(false);
             }
         }
@@ -2144,7 +2144,8 @@ public class MainActivity extends Activity {
         roomPhoto.setImageDrawable(null);
         drawingPhoto.setImageDrawable(null);
         photoStatus.setText("No photo selected.");
-        drawingStatus.setText("No hand drawing photo selected.");
+        drawingStatus.setText("No countertop drawing selected.");
+        photoAccordionOpen = 2;
         squareFootResult.setText("Net square footage: 0.00");
         totalResult.setText("Estimated total: $0.00");
         stepIndex = 0;
@@ -2209,7 +2210,7 @@ public class MainActivity extends Activity {
             case PAGE_EDGE_CHARGE: return "Edge or extra labor charge";
             case PAGE_TEAR_OUT: return "Tear-out charge";
             case PAGE_OTHER_CHARGE: return "Other charges";
-            case PAGE_PHOTO: return "Countertop photo";
+            case PAGE_PHOTO: return "Drawing and square footage";
             case PAGE_COOKTOP_CUTOUT: return "Cooktop or extra cutouts";
             case PAGE_EDGE_DETAIL: return "Edge detail";
             case PAGE_FAUCET: return "RAMSIER'S faucet";
@@ -2273,7 +2274,7 @@ public class MainActivity extends Activity {
             case PAGE_STOVE_LENGTH: return questionText(pageId, "What is the slide-in stove opening length?");
             case PAGE_STOVE_WIDTH: return questionText(pageId, "What is the slide-in stove opening width?");
             case PAGE_SLABS: return "Which slabs does the customer like?";
-            case PAGE_PHOTO: return "How would you like to figure out the square footage?";
+            case PAGE_PHOTO: return questionText(pageId, "Upload a countertop drawing for AI square footage");
             case PAGE_ADD_SECTION: return "Would you like to add another countertop section?";
             default: return pageTitle(pageId);
         }
@@ -2345,6 +2346,7 @@ public class MainActivity extends Activity {
         applyV122PageChangesOnce();
         applyV127PageChangesOnce();
         applyV130PageChangesOnce();
+        applyV138PageChangesOnce();
     }
 
     private void addNewPricingPagesOnce() {
@@ -2424,6 +2426,14 @@ public class MainActivity extends Activity {
         movePageBefore(PAGE_EDGE_DETAIL, PAGE_CABINETS);
         savePageOrder();
         prefs.edit().putBoolean("v1_30_page_changes_applied", true).apply();
+    }
+
+    private void applyV138PageChangesOnce() {
+        if (prefs.getBoolean("v1_38_page_changes_applied", false)) return;
+        pageOrder.remove(Integer.valueOf(PAGE_PHOTO));
+        pageOrder.add(Math.min(4, pageOrder.size()), PAGE_PHOTO);
+        savePageOrder();
+        prefs.edit().putBoolean("v1_38_page_changes_applied", true).apply();
     }
 
     private void movePageBefore(int pageId, int beforePageId) {

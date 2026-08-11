@@ -10,8 +10,8 @@ android {
         applicationId 'com.ramsiers.graniteapp'
         minSdk 23
         targetSdk 35
-        versionCode 38
-        versionName '1.37-test'
+        versionCode 39
+        versionName '1.38-test'
     }
 
     compileOptions {
