@@ -2,6 +2,7 @@ package com.ramsiers.graniteapp;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.Dialog;
 import android.Manifest;
 import android.content.ClipData;
 import android.content.Context;
@@ -17,6 +18,7 @@ import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
 import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.location.Address;
 import android.location.Geocoder;
@@ -31,13 +33,18 @@ import android.text.InputType;
 import android.text.TextWatcher;
 import android.util.Base64;
 import android.view.Gravity;
+import android.view.GestureDetector;
+import android.view.MotionEvent;
+import android.view.ScaleGestureDetector;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.Window;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.ArrayAdapter;
 import android.widget.AutoCompleteTextView;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
@@ -211,6 +218,7 @@ public class MainActivity extends Activity {
     private Runnable drawingProgressRunnable;
     private final Object drawingConnectionLock = new Object();
     private HttpURLConnection activeDrawingConnection;
+    private Dialog drawingZoomDialog;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -238,6 +246,10 @@ public class MainActivity extends Activity {
             activeDrawingConnection = null;
         }
         if (connection != null) connection.disconnect();
+        if (drawingZoomDialog != null) {
+            drawingZoomDialog.dismiss();
+            drawingZoomDialog = null;
+        }
         super.onDestroy();
     }
 
@@ -336,6 +348,8 @@ public class MainActivity extends Activity {
         drawingPhoto.setAdjustViewBounds(true);
         drawingPhoto.setScaleType(ImageView.ScaleType.FIT_CENTER);
         drawingPhoto.setBackgroundColor(Color.WHITE);
+        drawingPhoto.setContentDescription("Original countertop drawing. Tap to zoom.");
+        drawingPhoto.setOnClickListener(v -> showDrawingZoom(false));
         drawingProgressBar = new ProgressBar(
                 this,
                 null,
@@ -352,6 +366,7 @@ public class MainActivity extends Activity {
         drawingVerificationStatus.setGravity(Gravity.CENTER);
         drawingVerificationStatus.setVisibility(View.GONE);
         verificationDrawingView = new VerificationDrawingView(this);
+        verificationDrawingView.setOnClickListener(v -> showDrawingZoom(true));
         verificationDrawingView.setVisibility(View.GONE);
 
         setContentView(screen);
@@ -844,6 +859,7 @@ public class MainActivity extends Activity {
                 detach(drawingPhoto);
                 page.addView(drawingPhoto, new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT, dp(300)));
+                addHelp("Tap either picture to open it. Pinch to zoom, drag to move, or double-tap to reset.");
 
                 if (!aiDrawingConfidence.isEmpty()) {
                     page.addView(sectionHeader("AI verification redraw — compare every dimension"));
@@ -2171,6 +2187,91 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void showDrawingZoom(boolean verificationRedraw) {
+        if (verificationRedraw && aiVerificationDrawing == null) {
+            Toast.makeText(this, "No AI redraw is available yet.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Drawable originalDrawable = drawingPhoto.getDrawable();
+        if (!verificationRedraw && originalDrawable == null) {
+            Toast.makeText(this, "No original drawing is available yet.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (drawingZoomDialog != null) drawingZoomDialog.dismiss();
+
+        Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(Color.BLACK);
+
+        LinearLayout controls = new LinearLayout(this);
+        controls.setOrientation(LinearLayout.HORIZONTAL);
+        controls.setGravity(Gravity.CENTER_VERTICAL);
+        controls.setPadding(dp(12), dp(8), dp(12), dp(8));
+        controls.setBackgroundColor(Color.rgb(91, 58, 41));
+
+        TextView title = new TextView(this);
+        title.setText(verificationRedraw ? "AI verification redraw" : "Original drawing");
+        title.setTextColor(Color.WHITE);
+        title.setTextSize(18);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        controls.addView(title, new LinearLayout.LayoutParams(0, dp(48), 1f));
+
+        Button reset = new Button(this);
+        reset.setText("Reset");
+        reset.setAllCaps(false);
+        controls.addView(reset, new LinearLayout.LayoutParams(dp(82), dp(48)));
+
+        Button close = new Button(this);
+        close.setText("Close");
+        close.setAllCaps(false);
+        controls.addView(close, new LinearLayout.LayoutParams(dp(82), dp(48)));
+        root.addView(controls, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        ZoomPanFrame zoomFrame = new ZoomPanFrame(this);
+        if (verificationRedraw) {
+            VerificationDrawingView enlargedRedraw = new VerificationDrawingView(this);
+            enlargedRedraw.setVerificationDrawing(aiVerificationDrawing);
+            zoomFrame.setZoomContent(enlargedRedraw);
+        } else {
+            ImageView enlargedOriginal = new ImageView(this);
+            enlargedOriginal.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            enlargedOriginal.setBackgroundColor(Color.BLACK);
+            Drawable zoomDrawable = originalDrawable;
+            if (originalDrawable.getConstantState() != null) {
+                zoomDrawable = originalDrawable.getConstantState().newDrawable(getResources());
+            }
+            enlargedOriginal.setImageDrawable(zoomDrawable);
+            enlargedOriginal.setContentDescription("Enlarged original countertop drawing");
+            zoomFrame.setZoomContent(enlargedOriginal);
+        }
+        root.addView(zoomFrame, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                0,
+                1f));
+
+        reset.setOnClickListener(v -> zoomFrame.resetZoom());
+        close.setOnClickListener(v -> dialog.dismiss());
+        dialog.setOnDismissListener(ignored -> {
+            zoomFrame.removeAllViews();
+            if (drawingZoomDialog == dialog) drawingZoomDialog = null;
+        });
+        dialog.setContentView(root);
+        dialog.show();
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(Color.BLACK));
+            window.setLayout(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT);
+        }
+        drawingZoomDialog = dialog;
+    }
+
     private void showDrawingResult(
             int requestId,
             boolean canCalculate,
@@ -3236,6 +3337,155 @@ public class MainActivity extends Activity {
         return Math.round(value * getResources().getDisplayMetrics().density);
     }
 
+    private static class ZoomPanFrame extends FrameLayout {
+        private static final float MINIMUM_SCALE = 1f;
+        private static final float MAXIMUM_SCALE = 8f;
+        private final ScaleGestureDetector scaleDetector;
+        private final GestureDetector gestureDetector;
+        private View zoomContent;
+        private float scale = MINIMUM_SCALE;
+        private float translationX;
+        private float translationY;
+        private float lastX;
+        private float lastY;
+        private boolean moved;
+
+        ZoomPanFrame(Context context) {
+            super(context);
+            setBackgroundColor(Color.BLACK);
+            setClickable(true);
+            scaleDetector = new ScaleGestureDetector(
+                    context,
+                    new ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                        @Override
+                        public boolean onScale(ScaleGestureDetector detector) {
+                            float previousScale = scale;
+                            float nextScale = clampZoom(
+                                    previousScale * detector.getScaleFactor(),
+                                    MINIMUM_SCALE,
+                                    MAXIMUM_SCALE);
+                            if (Math.abs(nextScale - previousScale) < 0.001f) return true;
+                            float ratio = nextScale / previousScale;
+                            float focusFromCenterX = detector.getFocusX() - getWidth() / 2f;
+                            float focusFromCenterY = detector.getFocusY() - getHeight() / 2f;
+                            translationX = focusFromCenterX
+                                    - (focusFromCenterX - translationX) * ratio;
+                            translationY = focusFromCenterY
+                                    - (focusFromCenterY - translationY) * ratio;
+                            scale = nextScale;
+                            moved = true;
+                            applyTransform();
+                            return true;
+                        }
+                    });
+            gestureDetector = new GestureDetector(
+                    context,
+                    new GestureDetector.SimpleOnGestureListener() {
+                        @Override
+                        public boolean onDown(MotionEvent event) {
+                            return true;
+                        }
+
+                        @Override
+                        public boolean onDoubleTap(MotionEvent event) {
+                            resetZoom();
+                            return true;
+                        }
+                    });
+        }
+
+        void setZoomContent(View view) {
+            removeAllViews();
+            zoomContent = view;
+            addView(view, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT));
+            post(this::resetZoom);
+        }
+
+        void resetZoom() {
+            scale = MINIMUM_SCALE;
+            translationX = 0f;
+            translationY = 0f;
+            applyTransform();
+        }
+
+        private void applyTransform() {
+            if (zoomContent == null) return;
+            clampTranslation();
+            zoomContent.setPivotX(zoomContent.getWidth() / 2f);
+            zoomContent.setPivotY(zoomContent.getHeight() / 2f);
+            zoomContent.setScaleX(scale);
+            zoomContent.setScaleY(scale);
+            zoomContent.setTranslationX(translationX);
+            zoomContent.setTranslationY(translationY);
+        }
+
+        private void clampTranslation() {
+            if (zoomContent == null) return;
+            float maximumX = Math.max(
+                    0f,
+                    (zoomContent.getWidth() * scale - getWidth()) / 2f);
+            float maximumY = Math.max(
+                    0f,
+                    (zoomContent.getHeight() * scale - getHeight()) / 2f);
+            translationX = clampZoom(translationX, -maximumX, maximumX);
+            translationY = clampZoom(translationY, -maximumY, maximumY);
+        }
+
+        @Override
+        public boolean onInterceptTouchEvent(MotionEvent event) {
+            return true;
+        }
+
+        @Override
+        public boolean onTouchEvent(MotionEvent event) {
+            getParent().requestDisallowInterceptTouchEvent(true);
+            gestureDetector.onTouchEvent(event);
+            scaleDetector.onTouchEvent(event);
+
+            int action = event.getActionMasked();
+            if (action == MotionEvent.ACTION_DOWN) {
+                lastX = event.getX();
+                lastY = event.getY();
+                moved = false;
+            } else if (action == MotionEvent.ACTION_MOVE) {
+                if (scaleDetector.isInProgress() || event.getPointerCount() > 1) {
+                    lastX = event.getX(0);
+                    lastY = event.getY(0);
+                } else if (scale > MINIMUM_SCALE) {
+                    float nextX = event.getX();
+                    float nextY = event.getY();
+                    float dx = nextX - lastX;
+                    float dy = nextY - lastY;
+                    if (Math.abs(dx) > 1f || Math.abs(dy) > 1f) moved = true;
+                    translationX += dx;
+                    translationY += dy;
+                    lastX = nextX;
+                    lastY = nextY;
+                    applyTransform();
+                }
+            } else if (action == MotionEvent.ACTION_POINTER_UP) {
+                int survivingPointer = event.getActionIndex() == 0 ? 1 : 0;
+                lastX = event.getX(survivingPointer);
+                lastY = event.getY(survivingPointer);
+            } else if (action == MotionEvent.ACTION_UP) {
+                if (!moved) performClick();
+            }
+            return true;
+        }
+
+        @Override
+        public boolean performClick() {
+            super.performClick();
+            return true;
+        }
+
+        private static float clampZoom(float value, float minimum, float maximum) {
+            return Math.max(minimum, Math.min(maximum, value));
+        }
+    }
+
     private static class VerificationDrawingView extends View {
         private static final float DEFAULT_CANVAS_WIDTH = 1000f;
         private static final float DEFAULT_CANVAS_HEIGHT = 700f;
@@ -3248,7 +3498,7 @@ public class MainActivity extends Activity {
         VerificationDrawingView(Context context) {
             super(context);
             setBackgroundColor(Color.WHITE);
-            setContentDescription("AI verification redraw of the countertop plan");
+            setContentDescription("AI verification redraw of the countertop plan. Tap to zoom.");
             fillPaint.setStyle(Paint.Style.FILL);
             linePaint.setStyle(Paint.Style.STROKE);
             linePaint.setStrokeJoin(Paint.Join.ROUND);
@@ -3295,15 +3545,24 @@ public class MainActivity extends Activity {
             canvas.translate(left, top);
             canvas.scale(scale, scale);
             JSONArray shapes = verificationDrawing.optJSONArray("shapes");
-            drawShapes(canvas, shapes);
-            drawDimensions(canvas, verificationDrawing.optJSONArray("dimensions"), shapes);
+            JSONArray dimensions = verificationDrawing.optJSONArray("dimensions");
+            List<BacksplashStrip> backsplashStrips = buildBacksplashStrips(
+                    dimensions,
+                    shapes,
+                    canvasWidth,
+                    canvasHeight);
+            drawShapes(canvas, shapes, backsplashStrips);
+            drawDimensions(canvas, dimensions, shapes, backsplashStrips);
+            drawBacksplashDimensions(canvas, backsplashStrips);
             canvas.restore();
         }
 
-        private void drawShapes(Canvas canvas, JSONArray shapes) {
+        private void drawShapes(
+                Canvas canvas,
+                JSONArray shapes,
+                List<BacksplashStrip> backsplashStrips) {
             if (shapes == null) return;
-            // Keep narrow backsplash strips above countertops, then restore openings on top.
-            // Their 4-inch thickness can otherwise be completely covered by a countertop.
+            // Countertops first, normalized backsplash strips second, and openings last.
             for (int pass = 0; pass < 3; pass++) {
                 for (int i = 0; i < Math.min(shapes.length(), 24); i++) {
                     JSONObject shape = shapes.optJSONObject(i);
@@ -3312,10 +3571,13 @@ public class MainActivity extends Activity {
                     boolean drawInThisPass = pass == 0
                             ? !"opening".equals(kind) && !"backsplash".equals(kind)
                             : pass == 1
-                            ? "backsplash".equals(kind)
+                            ? backsplashStrips.isEmpty() && "backsplash".equals(kind)
                             : "opening".equals(kind);
                     if (!drawInThisPass) continue;
                     drawShape(canvas, shape);
+                }
+                if (pass == 1 && !backsplashStrips.isEmpty()) {
+                    drawBacksplashStrips(canvas, backsplashStrips);
                 }
             }
         }
@@ -3367,13 +3629,299 @@ public class MainActivity extends Activity {
             }
         }
 
-        private void drawDimensions(Canvas canvas, JSONArray dimensions, JSONArray shapes) {
+        private List<BacksplashStrip> buildBacksplashStrips(
+                JSONArray dimensions,
+                JSONArray shapes,
+                float canvasWidth,
+                float canvasHeight) {
+            List<BacksplashStrip> strips = new ArrayList<>();
+            if (dimensions == null) return strips;
+
+            HashMap<String, BacksplashDimensionGroup> groups = new HashMap<>();
+            for (int i = 0; i < Math.min(dimensions.length(), 50); i++) {
+                JSONObject dimension = dimensions.optJSONObject(i);
+                if (dimension == null) continue;
+                JSONArray partIds = dimension.optJSONArray("part_ids");
+                if (partIds == null) continue;
+                for (int idIndex = 0; idIndex < Math.min(partIds.length(), 12); idIndex++) {
+                    String partId = partIds.optString(idIndex, "").trim();
+                    if (partId.isEmpty()) continue;
+                    BacksplashDimensionGroup group = groups.get(partId);
+                    if (group == null) {
+                        group = new BacksplashDimensionGroup(partId);
+                        groups.put(partId, group);
+                    }
+                    group.dimensions.add(dimension);
+                }
+            }
+
+            for (BacksplashDimensionGroup group : groups.values()) {
+                group.chooseDimensions();
+                if (!group.isBacksplash()) continue;
+                BacksplashStrip strip = createBacksplashStrip(
+                        group,
+                        shapes,
+                        canvasWidth,
+                        canvasHeight);
+                if (strip != null) strips.add(strip);
+            }
+            return strips;
+        }
+
+        private BacksplashStrip createBacksplashStrip(
+                BacksplashDimensionGroup group,
+                JSONArray shapes,
+                float canvasWidth,
+                float canvasHeight) {
+            JSONObject lengthDimension = group.lengthDimension;
+            if (lengthDimension == null) return null;
+
+            float x1 = (float) lengthDimension.optDouble("x1", 0);
+            float y1 = (float) lengthDimension.optDouble("y1", 0);
+            float x2 = (float) lengthDimension.optDouble("x2", 0);
+            float y2 = (float) lengthDimension.optDouble("y2", 0);
+            float dx = x2 - x1;
+            float dy = y2 - y1;
+            float lineLength = (float) Math.sqrt(dx * dx + dy * dy);
+            if (Float.isNaN(lineLength) || Float.isInfinite(lineLength) || lineLength < 2f) {
+                return null;
+            }
+
+            float unitX = dx / lineLength;
+            float unitY = dy / lineLength;
+            float normalX = -unitY;
+            float normalY = unitX;
+            float midpointX = (x1 + x2) / 2f;
+            float midpointY = (y1 + y2) / 2f;
+
+            JSONObject nearestCountertop = nearestCountertopShape(
+                    midpointX,
+                    midpointY,
+                    shapes);
+            float outwardX;
+            float outwardY;
+            float nearProjection;
+            if (nearestCountertop != null) {
+                RectF counterBounds = shapeBounds(nearestCountertop);
+                float counterSide = (counterBounds.centerX() - midpointX) * normalX
+                        + (counterBounds.centerY() - midpointY) * normalY;
+                float outwardSign = counterSide >= 0f ? -1f : 1f;
+                outwardX = normalX * outwardSign;
+                outwardY = normalY * outwardSign;
+                nearProjection = maximumShapeProjection(
+                        nearestCountertop,
+                        outwardX,
+                        outwardY) + 28f;
+            } else {
+                float canvasSide = (canvasWidth / 2f - midpointX) * normalX
+                        + (canvasHeight / 2f - midpointY) * normalY;
+                float outwardSign = canvasSide >= 0f ? -1f : 1f;
+                outwardX = normalX * outwardSign;
+                outwardY = normalY * outwardSign;
+                nearProjection = midpointX * outwardX + midpointY * outwardY + 18f;
+            }
+
+            double lengthInches = positiveValue(lengthDimension.optDouble("value_inches", 0));
+            double widthInches = group.widthDimension == null
+                    ? 0
+                    : positiveValue(group.widthDimension.optDouble("value_inches", 0));
+            float proportionalThickness = lengthInches > 0 && widthInches > 0
+                    ? (float) (lineLength * widthInches / lengthInches)
+                    : 18f;
+            float measuredThickness = dimensionLineLength(group.widthDimension);
+            float thickness = measuredThickness > 1f
+                    ? (proportionalThickness + measuredThickness) / 2f
+                    : proportionalThickness;
+            thickness = clamp(thickness, 14f, 30f);
+
+            float startProjection = Math.min(
+                    x1 * unitX + y1 * unitY,
+                    x2 * unitX + y2 * unitY);
+            float endProjection = Math.max(
+                    x1 * unitX + y1 * unitY,
+                    x2 * unitX + y2 * unitY);
+            float farProjection = nearProjection + thickness;
+            BacksplashStrip strip = new BacksplashStrip(
+                    group.partId,
+                    lengthDimension,
+                    group.widthDimension,
+                    unitX,
+                    unitY,
+                    outwardX,
+                    outwardY);
+            strip.setPoint(0, unitX, unitY, startProjection, outwardX, outwardY, nearProjection);
+            strip.setPoint(1, unitX, unitY, endProjection, outwardX, outwardY, nearProjection);
+            strip.setPoint(2, unitX, unitY, endProjection, outwardX, outwardY, farProjection);
+            strip.setPoint(3, unitX, unitY, startProjection, outwardX, outwardY, farProjection);
+            strip.shiftInsideCanvas(canvasWidth, canvasHeight, 10f);
+            return strip;
+        }
+
+        private void drawBacksplashStrips(Canvas canvas, List<BacksplashStrip> strips) {
+            fillPaint.setColor(Color.rgb(211, 157, 73));
+            linePaint.setColor(Color.rgb(91, 58, 41));
+            linePaint.setStrokeWidth(6f);
+            for (BacksplashStrip strip : strips) {
+                Path path = new Path();
+                path.moveTo(strip.x[0], strip.y[0]);
+                for (int i = 1; i < 4; i++) path.lineTo(strip.x[i], strip.y[i]);
+                path.close();
+                canvas.drawPath(path, fillPaint);
+                canvas.drawPath(path, linePaint);
+            }
+        }
+
+        private void drawBacksplashDimensions(
+                Canvas canvas,
+                List<BacksplashStrip> strips) {
+            if (strips.isEmpty()) return;
+            linePaint.setColor(Color.rgb(25, 25, 25));
+            linePaint.setStrokeWidth(3f);
+            textPaint.setTextSize(34f);
+            for (BacksplashStrip strip : strips) {
+                float lengthX1 = strip.x[3] + strip.outwardX * 18f;
+                float lengthY1 = strip.y[3] + strip.outwardY * 18f;
+                float lengthX2 = strip.x[2] + strip.outwardX * 18f;
+                float lengthY2 = strip.y[2] + strip.outwardY * 18f;
+                drawMeasurementLine(canvas, lengthX1, lengthY1, lengthX2, lengthY2);
+                String lengthLabel = strip.lengthDimension.optString("label", "").trim();
+                if (!lengthLabel.isEmpty()) {
+                    drawTextWithBackground(
+                            canvas,
+                            lengthLabel,
+                            (lengthX1 + lengthX2) / 2f + strip.outwardX * 25f,
+                            (lengthY1 + lengthY2) / 2f + strip.outwardY * 25f + 12f);
+                }
+
+                if (strip.widthDimension != null) {
+                    float widthX1 = strip.x[1] + strip.unitX * 18f;
+                    float widthY1 = strip.y[1] + strip.unitY * 18f;
+                    float widthX2 = strip.x[2] + strip.unitX * 18f;
+                    float widthY2 = strip.y[2] + strip.unitY * 18f;
+                    drawMeasurementLine(canvas, widthX1, widthY1, widthX2, widthY2);
+                    String widthLabel = strip.widthDimension.optString("label", "").trim();
+                    if (!widthLabel.isEmpty()) {
+                        drawTextWithBackground(
+                                canvas,
+                                widthLabel,
+                                (widthX1 + widthX2) / 2f + strip.unitX * 25f,
+                                (widthY1 + widthY2) / 2f + strip.unitY * 25f + 12f);
+                    }
+                }
+            }
+        }
+
+        private void drawMeasurementLine(
+                Canvas canvas,
+                float x1,
+                float y1,
+                float x2,
+                float y2) {
+            float dx = x2 - x1;
+            float dy = y2 - y1;
+            float length = (float) Math.sqrt(dx * dx + dy * dy);
+            if (length < 1f) return;
+            canvas.drawLine(x1, y1, x2, y2, linePaint);
+            drawArrow(canvas, x1, y1, dx / length, dy / length, false);
+            drawArrow(canvas, x2, y2, dx / length, dy / length, true);
+        }
+
+        private boolean belongsToBacksplashStrip(
+                JSONObject dimension,
+                List<BacksplashStrip> strips) {
+            JSONArray partIds = dimension.optJSONArray("part_ids");
+            if (partIds == null) return false;
+            for (BacksplashStrip strip : strips) {
+                for (int i = 0; i < Math.min(partIds.length(), 12); i++) {
+                    if (strip.partId.equals(partIds.optString(i, ""))) return true;
+                }
+            }
+            return false;
+        }
+
+        private JSONObject nearestCountertopShape(float x, float y, JSONArray shapes) {
+            if (shapes == null) return null;
+            JSONObject nearest = null;
+            float nearestDistance = Float.MAX_VALUE;
+            for (int i = 0; i < Math.min(shapes.length(), 24); i++) {
+                JSONObject shape = shapes.optJSONObject(i);
+                if (shape == null) continue;
+                String kind = shape.optString("kind", "countertop");
+                if ("opening".equals(kind) || "backsplash".equals(kind)) continue;
+                RectF bounds = shapeBounds(shape);
+                if (bounds.isEmpty()) continue;
+                float nearestX = clamp(x, bounds.left, bounds.right);
+                float nearestY = clamp(y, bounds.top, bounds.bottom);
+                float distance = distanceSquared(x, y, nearestX, nearestY);
+                if (distance < nearestDistance) {
+                    nearestDistance = distance;
+                    nearest = shape;
+                }
+            }
+            return nearest;
+        }
+
+        private RectF shapeBounds(JSONObject shape) {
+            JSONArray points = shape.optJSONArray("points");
+            if (points == null) return new RectF();
+            float left = Float.MAX_VALUE;
+            float top = Float.MAX_VALUE;
+            float right = -Float.MAX_VALUE;
+            float bottom = -Float.MAX_VALUE;
+            for (int i = 0; i < Math.min(points.length(), 16); i++) {
+                JSONObject point = points.optJSONObject(i);
+                if (point == null) continue;
+                float x = (float) point.optDouble("x", 0);
+                float y = (float) point.optDouble("y", 0);
+                left = Math.min(left, x);
+                top = Math.min(top, y);
+                right = Math.max(right, x);
+                bottom = Math.max(bottom, y);
+            }
+            return left == Float.MAX_VALUE ? new RectF() : new RectF(left, top, right, bottom);
+        }
+
+        private float maximumShapeProjection(JSONObject shape, float axisX, float axisY) {
+            JSONArray points = shape.optJSONArray("points");
+            float maximum = -Float.MAX_VALUE;
+            if (points == null) return maximum;
+            for (int i = 0; i < Math.min(points.length(), 16); i++) {
+                JSONObject point = points.optJSONObject(i);
+                if (point == null) continue;
+                float projection = (float) point.optDouble("x", 0) * axisX
+                        + (float) point.optDouble("y", 0) * axisY;
+                maximum = Math.max(maximum, projection);
+            }
+            return maximum;
+        }
+
+        private static double positiveValue(double value) {
+            return !Double.isNaN(value) && !Double.isInfinite(value) && value > 0
+                    ? value
+                    : 0;
+        }
+
+        private static float dimensionLineLength(JSONObject dimension) {
+            if (dimension == null) return 0f;
+            float dx = (float) (dimension.optDouble("x2", 0)
+                    - dimension.optDouble("x1", 0));
+            float dy = (float) (dimension.optDouble("y2", 0)
+                    - dimension.optDouble("y1", 0));
+            return (float) Math.sqrt(dx * dx + dy * dy);
+        }
+
+        private void drawDimensions(
+                Canvas canvas,
+                JSONArray dimensions,
+                JSONArray shapes,
+                List<BacksplashStrip> backsplashStrips) {
             if (dimensions == null) return;
             linePaint.setColor(Color.rgb(25, 25, 25));
             linePaint.setStrokeWidth(3f);
             for (int i = 0; i < Math.min(dimensions.length(), 50); i++) {
                 JSONObject dimension = dimensions.optJSONObject(i);
                 if (dimension == null) continue;
+                if (belongsToBacksplashStrip(dimension, backsplashStrips)) continue;
                 float x1 = clamp((float) dimension.optDouble("x1", 0), 0, DEFAULT_CANVAS_WIDTH);
                 float y1 = clamp((float) dimension.optDouble("y1", 0), 0, DEFAULT_CANVAS_HEIGHT);
                 float x2 = clamp((float) dimension.optDouble("x2", 0), 0, DEFAULT_CANVAS_WIDTH);
@@ -3520,6 +4068,137 @@ public class MainActivity extends Activity {
                     baselineY + metrics.bottom + 4f);
             canvas.drawRoundRect(background, 5f, 5f, textBackgroundPaint);
             canvas.drawText(text, centerX, baselineY, textPaint);
+        }
+
+        private static class BacksplashDimensionGroup {
+            final String partId;
+            final List<JSONObject> dimensions = new ArrayList<>();
+            JSONObject lengthDimension;
+            JSONObject widthDimension;
+
+            BacksplashDimensionGroup(String partId) {
+                this.partId = partId;
+            }
+
+            void chooseDimensions() {
+                for (JSONObject dimension : dimensions) {
+                    String role = dimension.optString("role", "");
+                    if ("length".equals(role) && lengthDimension == null) {
+                        lengthDimension = dimension;
+                    } else if ("width".equals(role) && widthDimension == null) {
+                        widthDimension = dimension;
+                    }
+                }
+                if (lengthDimension == null) {
+                    double largest = -1;
+                    for (JSONObject dimension : dimensions) {
+                        double value = positiveValue(dimension.optDouble("value_inches", 0));
+                        if (value > largest) {
+                            largest = value;
+                            lengthDimension = dimension;
+                        }
+                    }
+                }
+                if (widthDimension == null) {
+                    double smallest = Double.MAX_VALUE;
+                    for (JSONObject dimension : dimensions) {
+                        if (dimension == lengthDimension && dimensions.size() > 1) continue;
+                        double value = positiveValue(dimension.optDouble("value_inches", 0));
+                        if (value > 0 && value < smallest) {
+                            smallest = value;
+                            widthDimension = dimension;
+                        }
+                    }
+                }
+            }
+
+            boolean isBacksplash() {
+                if (lengthDimension == null || widthDimension == null
+                        || lengthDimension == widthDimension) return false;
+                String lowerId = partId.toLowerCase(Locale.US);
+                boolean namedBacksplash = lowerId.contains("backsplash")
+                        || lowerId.contains("splash")
+                        || lowerId.startsWith("bs_")
+                        || lowerId.endsWith("_bs")
+                        || lowerId.equals("bs");
+                boolean namedOther = lowerId.contains("counter")
+                        || lowerId.startsWith("ct_")
+                        || lowerId.contains("island")
+                        || lowerId.contains("opening")
+                        || lowerId.contains("sink")
+                        || lowerId.contains("stove")
+                        || lowerId.contains("cooktop")
+                        || lowerId.contains("cutout");
+                double length = positiveValue(
+                        lengthDimension.optDouble("value_inches", 0));
+                double width = positiveValue(
+                        widthDimension.optDouble("value_inches", 0));
+                boolean backsplashProportions = !namedOther
+                        && width > 0
+                        && width <= 6.5
+                        && length >= width * 3;
+                return namedBacksplash || backsplashProportions;
+            }
+        }
+
+        private static class BacksplashStrip {
+            final String partId;
+            final JSONObject lengthDimension;
+            final JSONObject widthDimension;
+            final float unitX;
+            final float unitY;
+            final float outwardX;
+            final float outwardY;
+            final float[] x = new float[4];
+            final float[] y = new float[4];
+
+            BacksplashStrip(
+                    String partId,
+                    JSONObject lengthDimension,
+                    JSONObject widthDimension,
+                    float unitX,
+                    float unitY,
+                    float outwardX,
+                    float outwardY) {
+                this.partId = partId;
+                this.lengthDimension = lengthDimension;
+                this.widthDimension = widthDimension;
+                this.unitX = unitX;
+                this.unitY = unitY;
+                this.outwardX = outwardX;
+                this.outwardY = outwardY;
+            }
+
+            void setPoint(
+                    int index,
+                    float axisX,
+                    float axisY,
+                    float axisProjection,
+                    float normalX,
+                    float normalY,
+                    float normalProjection) {
+                x[index] = axisX * axisProjection + normalX * normalProjection;
+                y[index] = axisY * axisProjection + normalY * normalProjection;
+            }
+
+            void shiftInsideCanvas(float canvasWidth, float canvasHeight, float margin) {
+                float minimumX = Math.min(Math.min(x[0], x[1]), Math.min(x[2], x[3]));
+                float maximumX = Math.max(Math.max(x[0], x[1]), Math.max(x[2], x[3]));
+                float minimumY = Math.min(Math.min(y[0], y[1]), Math.min(y[2], y[3]));
+                float maximumY = Math.max(Math.max(y[0], y[1]), Math.max(y[2], y[3]));
+                float shiftX = minimumX < margin ? margin - minimumX : 0f;
+                if (maximumX + shiftX > canvasWidth - margin) {
+                    shiftX += canvasWidth - margin - (maximumX + shiftX);
+                }
+                float shiftY = minimumY < margin ? margin - minimumY : 0f;
+                if (maximumY + shiftY > canvasHeight - margin) {
+                    shiftY += canvasHeight - margin - (maximumY + shiftY);
+                }
+                for (int i = 0; i < 4; i++) {
+                    x[i] += shiftX;
+                    y[i] += shiftY;
+                }
+            }
         }
 
         private static float clamp(float value, float minimum, float maximum) {
