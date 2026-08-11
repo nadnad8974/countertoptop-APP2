@@ -11,7 +11,11 @@ import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.Path;
+import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.location.Address;
@@ -20,6 +24,7 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.provider.MediaStore;
 import android.text.Editable;
 import android.text.InputType;
@@ -35,6 +40,7 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
 import android.widget.ScrollView;
@@ -176,13 +182,23 @@ public class MainActivity extends Activity {
     private String aiDrawingConfidence = "";
     private String aiDrawingExplanation = "";
     private String aiDrawingMissingInformation = "";
+    private boolean aiDrawingCanCalculate;
+    private JSONObject aiVerificationDrawing;
+    private boolean drawingAnalysisInProgress;
+    private volatile int drawingAnalysisRequestId;
+    private long drawingAnalysisStartedAt;
+    private int drawingProgressFloor;
 
     private TextView squareFootResult;
     private TextView totalResult;
     private TextView photoStatus;
     private TextView drawingStatus;
+    private TextView drawingProgressText;
+    private TextView drawingVerificationStatus;
     private ImageView roomPhoto;
     private ImageView drawingPhoto;
+    private ProgressBar drawingProgressBar;
+    private VerificationDrawingView verificationDrawingView;
     private Button analyzeDrawingButton;
     private Uri selectedPhotoUri;
     private Uri drawingPhotoUri;
@@ -190,7 +206,11 @@ public class MainActivity extends Activity {
     private int photoAccordionOpen = 2;
     private int pendingCameraCapture = 0;
     private final Handler addressHandler = new Handler(Looper.getMainLooper());
+    private final Handler drawingProgressHandler = new Handler(Looper.getMainLooper());
     private Runnable addressLookupRunnable;
+    private Runnable drawingProgressRunnable;
+    private final Object drawingConnectionLock = new Object();
+    private HttpURLConnection activeDrawingConnection;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -200,6 +220,25 @@ public class MainActivity extends Activity {
         loadCustomPages();
         loadPageOrder();
         buildUi();
+    }
+
+    @Override
+    protected void onDestroy() {
+        drawingAnalysisRequestId++;
+        drawingAnalysisInProgress = false;
+        if (drawingProgressRunnable != null) {
+            drawingProgressHandler.removeCallbacks(drawingProgressRunnable);
+        }
+        if (addressLookupRunnable != null) {
+            addressHandler.removeCallbacks(addressLookupRunnable);
+        }
+        HttpURLConnection connection;
+        synchronized (drawingConnectionLock) {
+            connection = activeDrawingConnection;
+            activeDrawingConnection = null;
+        }
+        if (connection != null) connection.disconnect();
+        super.onDestroy();
     }
 
     private void buildUi() {
@@ -295,7 +334,25 @@ public class MainActivity extends Activity {
         drawingStatus.setTextSize(14);
         drawingPhoto = new ImageView(this);
         drawingPhoto.setAdjustViewBounds(true);
-        drawingPhoto.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        drawingPhoto.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        drawingPhoto.setBackgroundColor(Color.WHITE);
+        drawingProgressBar = new ProgressBar(
+                this,
+                null,
+                android.R.attr.progressBarStyleHorizontal);
+        drawingProgressBar.setMax(100);
+        drawingProgressBar.setProgress(0);
+        drawingProgressBar.setVisibility(View.GONE);
+        drawingProgressText = label("");
+        drawingProgressText.setTextSize(14);
+        drawingProgressText.setGravity(Gravity.CENTER);
+        drawingProgressText.setVisibility(View.GONE);
+        drawingVerificationStatus = label("");
+        drawingVerificationStatus.setTextSize(14);
+        drawingVerificationStatus.setGravity(Gravity.CENTER);
+        drawingVerificationStatus.setVisibility(View.GONE);
+        verificationDrawingView = new VerificationDrawingView(this);
+        verificationDrawingView.setVisibility(View.GONE);
 
         setContentView(screen);
         showStep();
@@ -783,15 +840,51 @@ public class MainActivity extends Activity {
             page.addView(drawingUploadButton);
 
             if (drawingPhotoUri != null) {
-                detach(drawingStatus);
-                page.addView(drawingStatus);
+                page.addView(sectionHeader("Original drawing"));
                 detach(drawingPhoto);
                 page.addView(drawingPhoto, new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, dp(220)));
+                        ViewGroup.LayoutParams.MATCH_PARENT, dp(300)));
+
+                if (!aiDrawingConfidence.isEmpty()) {
+                    page.addView(sectionHeader("AI verification redraw — compare every dimension"));
+                    if (aiVerificationDrawing != null) {
+                        verificationDrawingView.setVerificationDrawing(aiVerificationDrawing);
+                        verificationDrawingView.setVisibility(View.VISIBLE);
+                        detach(verificationDrawingView);
+                        page.addView(verificationDrawingView, new LinearLayout.LayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT, dp(380)));
+                        String units = aiVerificationDrawing.optString("units", "unknown");
+                        String unitMessage = "unknown".equals(units)
+                                ? "Check the units shown on the original drawing."
+                                : "Units: " + units + ".";
+                        drawingVerificationStatus.setText(
+                                unitMessage
+                                        + " Compare this redraw with the original above before accepting the square footage.");
+                    } else {
+                        verificationDrawingView.clearDrawing();
+                        verificationDrawingView.setVisibility(View.GONE);
+                        drawingVerificationStatus.setText(
+                                "AI could not make a reliable redraw from this image. Verify the measurements manually.");
+                    }
+                    drawingVerificationStatus.setVisibility(View.VISIBLE);
+                    detach(drawingVerificationStatus);
+                    page.addView(drawingVerificationStatus);
+                }
+
                 analyzeDrawingButton = primaryButton("Figure square footage with AI");
-                analyzeDrawingButton.setEnabled(true);
+                analyzeDrawingButton.setEnabled(!drawingAnalysisInProgress);
                 analyzeDrawingButton.setOnClickListener(v -> analyzeDrawing());
                 page.addView(analyzeDrawingButton);
+
+                detach(drawingProgressBar);
+                LinearLayout.LayoutParams progressParams = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, dp(14));
+                progressParams.setMargins(0, dp(8), 0, dp(2));
+                page.addView(drawingProgressBar, progressParams);
+                detach(drawingProgressText);
+                page.addView(drawingProgressText);
+                detach(drawingStatus);
+                page.addView(drawingStatus);
                 addHelp("AI estimate only. Verify every dimension before using it for a price.");
             }
         }
@@ -1636,7 +1729,10 @@ public class MainActivity extends Activity {
 
     private String drawingEstimateSummary() {
         if (aiDrawingExplanation.isEmpty()) return "";
-        return "\nAI drawing estimate: " + number.format(aiDrawingSquareFeet) + " sq ft"
+        String result = aiDrawingCanCalculate
+                ? "\nAI drawing estimate: " + number.format(aiDrawingSquareFeet) + " sq ft"
+                : "\nAI drawing: Square footage could not be calculated";
+        return result
                 + "\nAI confidence: " + aiDrawingConfidence
                 + "\nAI calculation: " + aiDrawingExplanation
                 + (aiDrawingMissingInformation.isEmpty()
@@ -1779,14 +1875,29 @@ public class MainActivity extends Activity {
             Toast.makeText(this, "Take or choose a countertop drawing first.", Toast.LENGTH_LONG).show();
             return;
         }
-        analyzeDrawingButton.setEnabled(false);
-        drawingStatus.setText("Reading the drawing and calculating square footage...");
+        if (drawingAnalysisInProgress) return;
+
+        clearAiDrawingResult();
+        final int requestId = ++drawingAnalysisRequestId;
+        startDrawingProgress(requestId);
+        drawingStatus.setText("AI is working on the drawing...");
+        showStep();
 
         new Thread(() -> {
+            HttpURLConnection connection = null;
             try {
+                postDrawingProgress(requestId, 15, "Preparing drawing");
                 String image = drawingImageDataUrl();
-                HttpURLConnection connection =
-                        (HttpURLConnection) new URL(DRAWING_AI_ENDPOINT).openConnection();
+                if (requestId != drawingAnalysisRequestId) return;
+                postDrawingProgress(requestId, 25, "Uploading drawing");
+                connection = (HttpURLConnection) new URL(DRAWING_AI_ENDPOINT).openConnection();
+                synchronized (drawingConnectionLock) {
+                    if (requestId != drawingAnalysisRequestId) {
+                        connection.disconnect();
+                        return;
+                    }
+                    activeDrawingConnection = connection;
+                }
                 connection.setRequestMethod("POST");
                 connection.setConnectTimeout(30000);
                 connection.setReadTimeout(120000);
@@ -1796,8 +1907,23 @@ public class MainActivity extends Activity {
 
                 JSONObject request = new JSONObject();
                 request.put("image", image);
+                request.put("include_verification_drawing", true);
                 byte[] requestBytes = request.toString().getBytes(StandardCharsets.UTF_8);
-                connection.getOutputStream().write(requestBytes);
+                boolean canUpload;
+                synchronized (drawingConnectionLock) {
+                    canUpload = requestId == drawingAnalysisRequestId
+                            && activeDrawingConnection == connection;
+                }
+                if (!canUpload) return;
+                try (java.io.OutputStream outputStream = connection.getOutputStream()) {
+                    synchronized (drawingConnectionLock) {
+                        canUpload = requestId == drawingAnalysisRequestId
+                                && activeDrawingConnection == connection;
+                    }
+                    if (!canUpload) return;
+                    outputStream.write(requestBytes);
+                }
+                postDrawingProgress(requestId, 30, "AI is reading measurements");
 
                 int responseCode = connection.getResponseCode();
                 InputStream responseStream = responseCode >= 200 && responseCode < 300
@@ -1810,30 +1936,204 @@ public class MainActivity extends Activity {
                 }
 
                 double squareFeet = response.optDouble("square_feet", 0);
+                boolean canCalculate = response.optBoolean(
+                        "can_calculate",
+                        squareFeet > 0);
                 String confidence = response.optString("confidence", "low");
                 String explanation = response.optString("explanation", "");
                 String missingInformation = response.optString("missing_information", "");
-                runOnUiThread(() -> showDrawingResult(
-                        squareFeet,
-                        confidence,
-                        explanation,
-                        missingInformation));
+                JSONObject verificationDrawing = response.optJSONObject("verification_drawing");
+                runOnUiThread(() -> {
+                    if (requestId != drawingAnalysisRequestId) return;
+                    showDrawingResult(
+                            requestId,
+                            canCalculate,
+                            squareFeet,
+                            confidence,
+                            explanation,
+                            missingInformation,
+                            verificationDrawing);
+                });
             } catch (Exception e) {
                 String message = e.getMessage() == null
                         ? "The drawing could not be analyzed. Please try again."
                         : e.getMessage();
                 runOnUiThread(() -> {
+                    if (requestId != drawingAnalysisRequestId) return;
                     drawingStatus.setText(message);
-                    analyzeDrawingButton.setEnabled(true);
+                    failDrawingProgress(requestId);
                 });
+            } finally {
+                if (connection != null) {
+                    connection.disconnect();
+                    synchronized (drawingConnectionLock) {
+                        if (activeDrawingConnection == connection) {
+                            activeDrawingConnection = null;
+                        }
+                    }
+                }
             }
         }).start();
     }
 
+    private void startDrawingProgress(int requestId) {
+        drawingAnalysisInProgress = true;
+        drawingAnalysisStartedAt = SystemClock.elapsedRealtime();
+        drawingProgressFloor = 5;
+        drawingProgressBar.setProgress(5);
+        drawingProgressBar.setVisibility(View.VISIBLE);
+        drawingProgressText.setVisibility(View.VISIBLE);
+        drawingProgressText.setText(
+                "Estimated progress: 5%\nPreparing drawing — AI is still working");
+        if (analyzeDrawingButton != null) analyzeDrawingButton.setEnabled(false);
+        if (drawingProgressRunnable != null) {
+            drawingProgressHandler.removeCallbacks(drawingProgressRunnable);
+        }
+        drawingProgressRunnable = new Runnable() {
+            @Override
+            public void run() {
+                if (!drawingAnalysisInProgress || requestId != drawingAnalysisRequestId) return;
+                long elapsedSeconds = Math.max(
+                        0,
+                        (SystemClock.elapsedRealtime() - drawingAnalysisStartedAt) / 1000);
+                int estimated = Math.min(
+                        90,
+                        Math.max(
+                                drawingProgressFloor,
+                                8 + (int) Math.floor(Math.sqrt(elapsedSeconds) * 10)));
+                String stage;
+                if (elapsedSeconds < 4) {
+                    stage = "Preparing drawing";
+                } else if (elapsedSeconds < 12) {
+                    stage = "Uploading drawing";
+                } else if (elapsedSeconds < 30) {
+                    stage = "Reading measurements";
+                } else if (elapsedSeconds < 55) {
+                    stage = "Calculating square footage";
+                } else {
+                    stage = "Creating verification redraw";
+                }
+                drawingProgressBar.setProgress(estimated);
+                drawingProgressText.setText(
+                        "Estimated progress: " + estimated + "%\n"
+                                + stage + " — AI is still working ("
+                                + elapsedSeconds + " seconds)");
+                drawingProgressHandler.postDelayed(this, 1000);
+            }
+        };
+        drawingProgressHandler.post(drawingProgressRunnable);
+    }
+
+    private void postDrawingProgress(int requestId, int minimum, String stage) {
+        runOnUiThread(() -> {
+            if (!drawingAnalysisInProgress || requestId != drawingAnalysisRequestId) return;
+            drawingProgressFloor = Math.max(drawingProgressFloor, Math.min(90, minimum));
+            int progress = Math.max(drawingProgressBar.getProgress(), drawingProgressFloor);
+            drawingProgressBar.setProgress(progress);
+            drawingProgressText.setText(
+                    "Estimated progress: " + progress + "%\n"
+                            + stage + " — AI is still working");
+        });
+    }
+
+    private void finishDrawingProgress(int requestId) {
+        if (requestId != drawingAnalysisRequestId) return;
+        drawingAnalysisInProgress = false;
+        if (drawingProgressRunnable != null) {
+            drawingProgressHandler.removeCallbacks(drawingProgressRunnable);
+        }
+        long elapsedSeconds = Math.max(
+                0,
+                (SystemClock.elapsedRealtime() - drawingAnalysisStartedAt) / 1000);
+        drawingProgressBar.setProgress(100);
+        drawingProgressBar.setVisibility(View.VISIBLE);
+        drawingProgressText.setVisibility(View.VISIBLE);
+        String completedWork;
+        if (!aiDrawingCanCalculate) {
+            completedWork = "drawing review finished without a square-foot estimate";
+        } else if (aiVerificationDrawing != null) {
+            completedWork = "measurements and verification redraw finished";
+        } else {
+            completedWork = "measurement calculation finished";
+        }
+        drawingProgressText.setText(
+                "100% complete — " + completedWork + " in "
+                        + elapsedSeconds + " seconds");
+        if (analyzeDrawingButton != null) analyzeDrawingButton.setEnabled(true);
+    }
+
+    private void failDrawingProgress(int requestId) {
+        if (requestId != drawingAnalysisRequestId) return;
+        drawingAnalysisInProgress = false;
+        if (drawingProgressRunnable != null) {
+            drawingProgressHandler.removeCallbacks(drawingProgressRunnable);
+        }
+        drawingProgressBar.setVisibility(View.VISIBLE);
+        drawingProgressText.setVisibility(View.VISIBLE);
+        drawingProgressText.setText(
+                "AI stopped before completion. Tap the button to try again.");
+        if (analyzeDrawingButton != null) analyzeDrawingButton.setEnabled(true);
+    }
+
+    private void cancelDrawingAnalysis() {
+        drawingAnalysisRequestId++;
+        drawingAnalysisInProgress = false;
+        if (drawingProgressRunnable != null) {
+            drawingProgressHandler.removeCallbacks(drawingProgressRunnable);
+        }
+        HttpURLConnection connection;
+        synchronized (drawingConnectionLock) {
+            connection = activeDrawingConnection;
+            activeDrawingConnection = null;
+        }
+        if (connection != null) connection.disconnect();
+        drawingProgressFloor = 0;
+        drawingProgressBar.setProgress(0);
+        drawingProgressBar.setVisibility(View.GONE);
+        drawingProgressText.setText("");
+        drawingProgressText.setVisibility(View.GONE);
+        if (analyzeDrawingButton != null) analyzeDrawingButton.setEnabled(true);
+    }
+
+    private void clearAiDrawingResult() {
+        aiDrawingSquareFeet = 0;
+        aiDrawingConfidence = "";
+        aiDrawingExplanation = "";
+        aiDrawingMissingInformation = "";
+        aiDrawingCanCalculate = false;
+        aiVerificationDrawing = null;
+        verificationDrawingView.clearDrawing();
+        verificationDrawingView.setVisibility(View.GONE);
+        drawingVerificationStatus.setText("");
+        drawingVerificationStatus.setVisibility(View.GONE);
+    }
+
     private String drawingImageDataUrl() throws Exception {
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        try (InputStream input = getContentResolver().openInputStream(drawingPhotoUri)) {
+            if (input == null) {
+                throw new IllegalStateException("The drawing photo could not be read.");
+            }
+            BitmapFactory.decodeStream(input, null, bounds);
+        }
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+            throw new IllegalStateException("The drawing photo could not be read.");
+        }
+
+        int sampleSize = 1;
+        int largestOriginalSide = Math.max(bounds.outWidth, bounds.outHeight);
+        while (largestOriginalSide / sampleSize > 2400) {
+            sampleSize *= 2;
+        }
+        BitmapFactory.Options decodeOptions = new BitmapFactory.Options();
+        decodeOptions.inSampleSize = sampleSize;
         Bitmap original;
         try (InputStream input = getContentResolver().openInputStream(drawingPhotoUri)) {
-            original = BitmapFactory.decodeStream(input);
+            if (input == null) {
+                throw new IllegalStateException("The drawing photo could not be read.");
+            }
+            original = BitmapFactory.decodeStream(input, null, decodeOptions);
         }
         if (original == null) throw new IllegalStateException("The drawing photo could not be read.");
 
@@ -1871,23 +2171,36 @@ public class MainActivity extends Activity {
     }
 
     private void showDrawingResult(
+            int requestId,
+            boolean canCalculate,
             double squareFeet,
             String confidence,
             String explanation,
-            String missingInformation) {
-        aiDrawingSquareFeet = Math.max(0, squareFeet);
+            String missingInformation,
+            JSONObject verificationDrawing) {
+        aiDrawingCanCalculate = canCalculate;
+        aiDrawingSquareFeet = canCalculate ? Math.max(0, squareFeet) : 0;
         aiDrawingConfidence = confidence;
         aiDrawingExplanation = explanation;
         aiDrawingMissingInformation = missingInformation;
-        String result = "AI estimate: " + number.format(aiDrawingSquareFeet) + " sq ft"
-                + "\nConfidence: " + confidence
-                + "\n" + explanation;
+        aiVerificationDrawing = verificationDrawing;
+        if (verificationDrawing != null) {
+            verificationDrawingView.setVerificationDrawing(verificationDrawing);
+        } else {
+            verificationDrawingView.clearDrawing();
+        }
+        String result = canCalculate
+                ? "AI estimate: " + number.format(aiDrawingSquareFeet) + " sq ft"
+                : "AI could not calculate square footage from this drawing.";
+        result += "\nConfidence: " + confidence;
+        if (!explanation.isEmpty()) result += "\n" + explanation;
         if (!missingInformation.isEmpty()) {
             result += "\nMissing information: " + missingInformation;
         }
         result += "\nVerify all dimensions before pricing.";
         drawingStatus.setText(result);
-        analyzeDrawingButton.setEnabled(true);
+        finishDrawingProgress(requestId);
+        showStep();
     }
 
     @Override
@@ -1924,6 +2237,8 @@ public class MainActivity extends Activity {
             }
         }
         if (requestCode == PICK_DRAWING_IMAGE && resultCode == RESULT_OK && data != null && data.getData() != null) {
+            cancelDrawingAnalysis();
+            clearAiDrawingResult();
             drawingPhotoUri = data.getData();
             try {
                 int flags = data.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
@@ -1938,6 +2253,8 @@ public class MainActivity extends Activity {
         }
         if (requestCode == TAKE_DRAWING_PHOTO) {
             if (resultCode == RESULT_OK && drawingPhotoUri != null) {
+                cancelDrawingAnalysis();
+                clearAiDrawingResult();
                 drawingPhoto.setImageURI(drawingPhotoUri);
                 drawingStatus.setText("Drawing photo ready. Tap the AI button below.");
                 if (analyzeDrawingButton != null) analyzeDrawingButton.setEnabled(true);
@@ -1945,6 +2262,8 @@ public class MainActivity extends Activity {
                 showStep();
             } else if (resultCode == RESULT_OK && data != null && data.getExtras() != null
                     && data.getExtras().get("data") instanceof Bitmap) {
+                cancelDrawingAnalysis();
+                clearAiDrawingResult();
                 drawingPhotoUri = saveCameraBitmap(
                         (Bitmap) data.getExtras().get("data"),
                         "drawing_photos",
@@ -1960,6 +2279,8 @@ public class MainActivity extends Activity {
                     if (analyzeDrawingButton != null) analyzeDrawingButton.setEnabled(false);
                 }
             } else {
+                cancelDrawingAnalysis();
+                clearAiDrawingResult();
                 drawingPhotoUri = null;
                 drawingStatus.setText("No countertop drawing selected.");
                 if (analyzeDrawingButton != null) analyzeDrawingButton.setEnabled(false);
@@ -2089,6 +2410,8 @@ public class MainActivity extends Activity {
     }
 
     private void resetQuote() {
+        cancelDrawingAnalysis();
+        clearAiDrawingResult();
         slabs.clear();
         sections.clear();
         selectedPhotoUri = null;
@@ -2141,6 +2464,7 @@ public class MainActivity extends Activity {
         aiDrawingConfidence = "";
         aiDrawingExplanation = "";
         aiDrawingMissingInformation = "";
+        aiDrawingCanCalculate = false;
         roomPhoto.setImageDrawable(null);
         drawingPhoto.setImageDrawable(null);
         photoStatus.setText("No photo selected.");
@@ -2909,6 +3233,199 @@ public class MainActivity extends Activity {
 
     private int dp(int value) {
         return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+
+    private static class VerificationDrawingView extends View {
+        private static final float DEFAULT_CANVAS_WIDTH = 1000f;
+        private static final float DEFAULT_CANVAS_HEIGHT = 700f;
+        private JSONObject verificationDrawing;
+        private final Paint fillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint linePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint textBackgroundPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+        VerificationDrawingView(Context context) {
+            super(context);
+            setBackgroundColor(Color.WHITE);
+            setContentDescription("AI verification redraw of the countertop plan");
+            fillPaint.setStyle(Paint.Style.FILL);
+            linePaint.setStyle(Paint.Style.STROKE);
+            linePaint.setStrokeJoin(Paint.Join.ROUND);
+            linePaint.setStrokeCap(Paint.Cap.ROUND);
+            textPaint.setColor(Color.rgb(45, 45, 45));
+            textPaint.setTextAlign(Paint.Align.CENTER);
+            textPaint.setTypeface(Typeface.DEFAULT_BOLD);
+            textBackgroundPaint.setColor(Color.argb(225, 255, 255, 255));
+            textBackgroundPaint.setStyle(Paint.Style.FILL);
+        }
+
+        void setVerificationDrawing(JSONObject drawing) {
+            verificationDrawing = drawing;
+            invalidate();
+        }
+
+        void clearDrawing() {
+            verificationDrawing = null;
+            invalidate();
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            canvas.drawColor(Color.WHITE);
+            if (verificationDrawing == null) return;
+
+            float canvasWidth = (float) verificationDrawing.optDouble(
+                    "canvas_width",
+                    DEFAULT_CANVAS_WIDTH);
+            float canvasHeight = (float) verificationDrawing.optDouble(
+                    "canvas_height",
+                    DEFAULT_CANVAS_HEIGHT);
+            if (canvasWidth <= 0 || canvasHeight <= 0) return;
+
+            float outerPadding = 20f;
+            float availableWidth = Math.max(1f, getWidth() - outerPadding * 2f);
+            float availableHeight = Math.max(1f, getHeight() - outerPadding * 2f);
+            float scale = Math.min(availableWidth / canvasWidth, availableHeight / canvasHeight);
+            float left = (getWidth() - canvasWidth * scale) / 2f;
+            float top = (getHeight() - canvasHeight * scale) / 2f;
+
+            canvas.save();
+            canvas.translate(left, top);
+            canvas.scale(scale, scale);
+            drawShapes(canvas, verificationDrawing.optJSONArray("shapes"));
+            drawDimensions(canvas, verificationDrawing.optJSONArray("dimensions"));
+            canvas.restore();
+        }
+
+        private void drawShapes(Canvas canvas, JSONArray shapes) {
+            if (shapes == null) return;
+            for (int pass = 0; pass < 2; pass++) {
+                boolean openingsOnly = pass == 1;
+                for (int i = 0; i < Math.min(shapes.length(), 24); i++) {
+                    JSONObject shape = shapes.optJSONObject(i);
+                    if (shape == null) continue;
+                    boolean isOpening = "opening".equals(
+                            shape.optString("kind", "countertop"));
+                    if (isOpening != openingsOnly) continue;
+                    drawShape(canvas, shape);
+                }
+            }
+        }
+
+        private void drawShape(Canvas canvas, JSONObject shape) {
+            JSONArray points = shape.optJSONArray("points");
+            if (points == null || points.length() < 3) return;
+
+            Path path = new Path();
+            float centerX = 0;
+            float centerY = 0;
+            int validPoints = 0;
+            for (int pointIndex = 0; pointIndex < Math.min(points.length(), 16); pointIndex++) {
+                JSONObject point = points.optJSONObject(pointIndex);
+                if (point == null) continue;
+                float x = clamp((float) point.optDouble("x", 0), 0, DEFAULT_CANVAS_WIDTH);
+                float y = clamp((float) point.optDouble("y", 0), 0, DEFAULT_CANVAS_HEIGHT);
+                if (validPoints == 0) path.moveTo(x, y);
+                else path.lineTo(x, y);
+                centerX += x;
+                centerY += y;
+                validPoints++;
+            }
+            if (validPoints < 3) return;
+            path.close();
+            centerX /= validPoints;
+            centerY /= validPoints;
+
+            String kind = shape.optString("kind", "countertop");
+            if ("backsplash".equals(kind)) {
+                fillPaint.setColor(Color.rgb(224, 188, 132));
+            } else if ("opening".equals(kind)) {
+                fillPaint.setColor(Color.WHITE);
+            } else {
+                fillPaint.setColor(Color.rgb(239, 230, 220));
+            }
+            linePaint.setColor(Color.rgb(91, 58, 41));
+            linePaint.setStrokeWidth("opening".equals(kind) ? 5f : 4f);
+            canvas.drawPath(path, fillPaint);
+            canvas.drawPath(path, linePaint);
+
+            String label = shape.optString("label", "").trim();
+            if (!label.isEmpty()) {
+                textPaint.setTextSize(38f);
+                drawTextWithBackground(canvas, label, centerX, centerY + 13f);
+            }
+        }
+
+        private void drawDimensions(Canvas canvas, JSONArray dimensions) {
+            if (dimensions == null) return;
+            linePaint.setColor(Color.rgb(25, 25, 25));
+            linePaint.setStrokeWidth(3f);
+            for (int i = 0; i < Math.min(dimensions.length(), 50); i++) {
+                JSONObject dimension = dimensions.optJSONObject(i);
+                if (dimension == null) continue;
+                float x1 = clamp((float) dimension.optDouble("x1", 0), 0, DEFAULT_CANVAS_WIDTH);
+                float y1 = clamp((float) dimension.optDouble("y1", 0), 0, DEFAULT_CANVAS_HEIGHT);
+                float x2 = clamp((float) dimension.optDouble("x2", 0), 0, DEFAULT_CANVAS_WIDTH);
+                float y2 = clamp((float) dimension.optDouble("y2", 0), 0, DEFAULT_CANVAS_HEIGHT);
+                float dx = x2 - x1;
+                float dy = y2 - y1;
+                float length = (float) Math.sqrt(dx * dx + dy * dy);
+                if (length < 1f) continue;
+                canvas.drawLine(x1, y1, x2, y2, linePaint);
+                drawArrow(canvas, x1, y1, dx / length, dy / length, false);
+                drawArrow(canvas, x2, y2, dx / length, dy / length, true);
+
+                String label = dimension.optString("label", "").trim();
+                if (!label.isEmpty()) {
+                    textPaint.setTextSize(40f);
+                    float normalX = -dy / length;
+                    float normalY = dx / length;
+                    drawTextWithBackground(
+                            canvas,
+                            label,
+                            (x1 + x2) / 2f + normalX * 25f,
+                            (y1 + y2) / 2f + normalY * 25f + 13f);
+                }
+            }
+        }
+
+        private void drawArrow(
+                Canvas canvas,
+                float x,
+                float y,
+                float directionX,
+                float directionY,
+                boolean pointsBackward) {
+            float direction = pointsBackward ? -1f : 1f;
+            float alongX = directionX * 18f * direction;
+            float alongY = directionY * 18f * direction;
+            float normalX = -directionY * 8f;
+            float normalY = directionX * 8f;
+            canvas.drawLine(x, y, x + alongX + normalX, y + alongY + normalY, linePaint);
+            canvas.drawLine(x, y, x + alongX - normalX, y + alongY - normalY, linePaint);
+        }
+
+        private void drawTextWithBackground(
+                Canvas canvas,
+                String value,
+                float centerX,
+                float baselineY) {
+            String text = value.length() > 60 ? value.substring(0, 60) : value;
+            float width = textPaint.measureText(text);
+            Paint.FontMetrics metrics = textPaint.getFontMetrics();
+            RectF background = new RectF(
+                    centerX - width / 2f - 7f,
+                    baselineY + metrics.top - 4f,
+                    centerX + width / 2f + 7f,
+                    baselineY + metrics.bottom + 4f);
+            canvas.drawRoundRect(background, 5f, 5f, textBackgroundPaint);
+            canvas.drawText(text, centerX, baselineY, textPaint);
+        }
+
+        private static float clamp(float value, float minimum, float maximum) {
+            return Math.max(minimum, Math.min(maximum, value));
+        }
     }
 
     private static class SlabSelection {
