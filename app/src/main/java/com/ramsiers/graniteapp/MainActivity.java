@@ -192,7 +192,9 @@ public class MainActivity extends Activity {
     private String aiDrawingExplanation = "";
     private String aiDrawingMissingInformation = "";
     private boolean aiDrawingCanCalculate;
+    private boolean aiDrawingEditedByUser;
     private JSONObject aiVerificationDrawing;
+    private JSONArray aiDrawingCalculationParts;
     private boolean drawingAnalysisInProgress;
     private volatile int drawingAnalysisRequestId;
     private long drawingAnalysisStartedAt;
@@ -226,6 +228,7 @@ public class MainActivity extends Activity {
     private final Object drawingConnectionLock = new Object();
     private HttpURLConnection activeDrawingConnection;
     private Dialog drawingZoomDialog;
+    private Dialog drawingEditDialog;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -256,6 +259,10 @@ public class MainActivity extends Activity {
         if (drawingZoomDialog != null) {
             drawingZoomDialog.dismiss();
             drawingZoomDialog = null;
+        }
+        if (drawingEditDialog != null) {
+            drawingEditDialog.dismiss();
+            drawingEditDialog = null;
         }
         super.onDestroy();
     }
@@ -880,6 +887,9 @@ public class MainActivity extends Activity {
                         detach(verificationDrawingView);
                         page.addView(verificationDrawingView, new LinearLayout.LayoutParams(
                                 ViewGroup.LayoutParams.MATCH_PARENT, dp(380)));
+                        Button editRedraw = secondaryButton("Edit redraw dimensions or add a label");
+                        editRedraw.setOnClickListener(v -> showVerificationEditor());
+                        page.addView(editRedraw);
                         String units = aiVerificationDrawing.optString("units", "unknown");
                         String unitMessage = "unknown".equals(units)
                                 ? "Check the units shown on the original drawing."
@@ -921,7 +931,7 @@ public class MainActivity extends Activity {
         manualMeasurement.setOnClickListener(v -> togglePhotoAccordion(3));
         page.addView(manualMeasurement);
         if (photoAccordionOpen == 3) {
-            addHelp("Enter each piece in inches. Square footage is length × width ÷ 144. Finish the width field and the next blank piece will appear automatically.");
+            addHelp("L is length in inches. W is width in inches. T is the calculated square feet for that piece. Finish W and the next blank row appears automatically.");
             detach(manualMeasurementList);
             page.addView(manualMeasurementList);
             detach(manualMeasurementTotal);
@@ -967,6 +977,7 @@ public class MainActivity extends Activity {
         if (manualMeasurementList == null) return;
         renderingManualMeasurements = true;
         manualMeasurementList.removeAllViews();
+        manualMeasurementList.addView(manualMeasurementHeader());
 
         for (int i = 0; i < sections.size(); i++) {
             addManualMeasurementRow(i, sections.get(i));
@@ -981,44 +992,52 @@ public class MainActivity extends Activity {
             field.postDelayed(() -> {
                 if (photoAccordionOpen != 3 || field != pendingManualLength) return;
                 field.requestFocus();
+                field.requestRectangleOnScreen(
+                        new android.graphics.Rect(0, 0, field.getWidth(), field.getHeight()),
+                        true);
                 showKeyboard(field);
             }, 120);
         }
     }
 
+    private LinearLayout manualMeasurementHeader() {
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setPadding(dp(8), dp(8), dp(8), 0);
+        header.addView(manualMeasurementHeaderCell("L\nLength (in)"),
+                manualMeasurementColumnParams(0, dp(4)));
+        header.addView(manualMeasurementHeaderCell("W\nWidth (in)"),
+                manualMeasurementColumnParams(dp(4), dp(4)));
+        header.addView(manualMeasurementHeaderCell("T\nTotal sq ft"),
+                manualMeasurementColumnParams(dp(4), 0));
+        header.addView(new View(this), new LinearLayout.LayoutParams(dp(42), dp(58)));
+        return header;
+    }
+
+    private TextView manualMeasurementHeaderCell(String text) {
+        TextView header = label(text);
+        header.setTextSize(13);
+        header.setTypeface(Typeface.DEFAULT_BOLD);
+        header.setGravity(Gravity.CENTER);
+        return header;
+    }
+
     private void addManualMeasurementRow(int index, CounterSection section) {
         LinearLayout row = itemRow();
-        row.setOrientation(LinearLayout.VERTICAL);
-
-        LinearLayout heading = new LinearLayout(this);
-        heading.setOrientation(LinearLayout.HORIZONTAL);
-        heading.setGravity(Gravity.CENTER_VERTICAL);
-        TextView title = label("Piece " + (index + 1));
-        title.setTypeface(Typeface.DEFAULT_BOLD);
-        heading.addView(title, new LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-        Button remove = miniButton("DELETE");
-        remove.setOnClickListener(v -> {
-            sections.remove(index);
-            renumberGeneratedManualPieces();
-            saveLists();
-            renderManualMeasurements(false);
-            renderSections();
-            calculateAndDisplay(false);
-        });
-        heading.addView(remove);
-        row.addView(heading, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT));
 
         EditText length = input("Length in inches", decimalInput());
         EditText width = input("Width in inches", decimalInput());
+        styleManualMeasurementInput(length, "L");
+        styleManualMeasurementInput(width, "W");
+        length.setContentDescription("Piece " + (index + 1) + " length in inches");
+        width.setContentDescription("Piece " + (index + 1) + " width in inches");
         length.setText(measurementValue(section.length));
         width.setText(measurementValue(section.width));
         length.setImeOptions(EditorInfo.IME_ACTION_NEXT);
         width.setImeOptions(EditorInfo.IME_ACTION_DONE);
-        TextView result = label(manualPieceResult(section.length, section.width, section.quantity));
-        result.setTypeface(Typeface.DEFAULT_BOLD);
+        TextView result = manualMeasurementTotalBox(
+                manualPieceTotal(section.length, section.width, section.quantity));
+        result.setContentDescription("Piece " + (index + 1) + " total square feet");
 
         TextWatcher watcher = new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
@@ -1034,7 +1053,7 @@ public class MainActivity extends Activity {
                         enteredWidth,
                         current.quantity);
                 sections.set(index, updated);
-                result.setText(manualPieceResult(
+                result.setText(manualPieceTotal(
                         updated.length,
                         updated.width,
                         updated.quantity));
@@ -1047,47 +1066,75 @@ public class MainActivity extends Activity {
         length.addTextChangedListener(watcher);
         width.addTextChangedListener(watcher);
 
-        row.addView(length);
-        row.addView(width);
-        row.addView(result);
-        if (section.quantity != 1) {
-            TextView savedQuantity = label(
-                    "Saved quantity: " + measurementValue(section.quantity));
-            savedQuantity.setTextSize(13);
-            savedQuantity.setTextColor(Color.GRAY);
-            row.addView(savedQuantity);
-        }
+        row.addView(length, manualMeasurementColumnParams(0, dp(4)));
+        row.addView(width, manualMeasurementColumnParams(dp(4), dp(4)));
+        row.addView(result, manualMeasurementColumnParams(dp(4), 0));
+        Button remove = manualMeasurementDeleteButton(index);
+        row.addView(remove, new LinearLayout.LayoutParams(dp(42), dp(58)));
         manualMeasurementList.addView(row);
     }
 
     private void addBlankManualMeasurementRow() {
         LinearLayout row = itemRow();
-        row.setOrientation(LinearLayout.VERTICAL);
-
-        TextView title = label("Piece " + (sections.size() + 1));
-        title.setTypeface(Typeface.DEFAULT_BOLD);
-        row.addView(title);
 
         EditText length = input("Length in inches", decimalInput());
         EditText width = input("Width in inches", decimalInput());
+        styleManualMeasurementInput(length, "L");
+        styleManualMeasurementInput(width, "W");
+        length.setContentDescription("New piece length in inches");
+        width.setContentDescription("New piece width in inches");
         length.setImeOptions(EditorInfo.IME_ACTION_NEXT);
         width.setImeOptions(EditorInfo.IME_ACTION_NEXT);
-        TextView result = label("Piece square footage: 0.00 sq ft");
-        result.setTypeface(Typeface.DEFAULT_BOLD);
+        TextView result = manualMeasurementTotalBox("0.00\nsq ft");
+        result.setContentDescription("New piece total square feet");
         pendingManualLength = length;
         pendingManualWidth = width;
         manualPendingCommitted = false;
+        final int[] savedIndex = {-1};
+        View trailingSpacer = new View(this);
 
         TextWatcher previewWatcher = new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
             @Override public void afterTextChanged(Editable s) {
-                if (renderingManualMeasurements || manualPendingCommitted) return;
+                if (renderingManualMeasurements) return;
                 double enteredLength = value(length);
                 double enteredWidth = value(width);
                 double pendingSquareFeet = (enteredLength * enteredWidth) / 144.0;
-                result.setText(manualPieceResult(enteredLength, enteredWidth, 1));
-                updateManualMeasurementTotal(pendingSquareFeet);
+                result.setText(manualPieceTotal(enteredLength, enteredWidth, 1));
+                if (savedIndex[0] >= 0 && savedIndex[0] < sections.size()) {
+                    CounterSection current = sections.get(savedIndex[0]);
+                    sections.set(savedIndex[0], new CounterSection(
+                            current.name,
+                            enteredLength,
+                            enteredWidth,
+                            current.quantity));
+                    saveLists();
+                    renderSections();
+                    updateManualMeasurementTotal(0);
+                    calculateAndDisplay(false);
+                    return;
+                }
+                if (enteredLength > 0 && enteredWidth > 0) {
+                    savedIndex[0] = sections.size();
+                    manualPendingCommitted = true;
+                    sections.add(new CounterSection(
+                            "Piece " + (savedIndex[0] + 1),
+                            enteredLength,
+                            enteredWidth,
+                            1));
+                    saveLists();
+                    renderSections();
+                    updateManualMeasurementTotal(0);
+                    calculateAndDisplay(false);
+                    row.removeView(trailingSpacer);
+                    row.addView(
+                            manualMeasurementDeleteButton(savedIndex[0]),
+                            new LinearLayout.LayoutParams(dp(42), dp(58)));
+                    addBlankManualMeasurementRow();
+                } else {
+                    updateManualMeasurementTotal(pendingSquareFeet);
+                }
             }
         };
         length.addTextChangedListener(previewWatcher);
@@ -1096,6 +1143,18 @@ public class MainActivity extends Activity {
             if (actionId == EditorInfo.IME_ACTION_DONE
                     || actionId == EditorInfo.IME_ACTION_NEXT
                     || actionId == EditorInfo.IME_ACTION_UNSPECIFIED) {
+                if (savedIndex[0] >= 0 && pendingManualLength != null) {
+                    pendingManualLength.requestFocus();
+                    pendingManualLength.requestRectangleOnScreen(
+                            new android.graphics.Rect(
+                                    0,
+                                    0,
+                                    pendingManualLength.getWidth(),
+                                    pendingManualLength.getHeight()),
+                            true);
+                    showKeyboard(pendingManualLength);
+                    return true;
+                }
                 return commitPendingManualMeasurement(true);
             }
             return false;
@@ -1106,10 +1165,62 @@ public class MainActivity extends Activity {
         length.setOnFocusChangeListener(finishPieceOnBlur);
         width.setOnFocusChangeListener(finishPieceOnBlur);
 
-        row.addView(length);
-        row.addView(width);
-        row.addView(result);
+        row.addView(length, manualMeasurementColumnParams(0, dp(4)));
+        row.addView(width, manualMeasurementColumnParams(dp(4), dp(4)));
+        row.addView(result, manualMeasurementColumnParams(dp(4), 0));
+        row.addView(trailingSpacer, new LinearLayout.LayoutParams(dp(42), dp(58)));
         manualMeasurementList.addView(row);
+    }
+
+    private Button manualMeasurementDeleteButton(int index) {
+        Button remove = miniButton("×");
+        remove.setTextSize(18);
+        remove.setContentDescription("Delete piece " + (index + 1));
+        remove.setOnClickListener(v -> {
+            if (index < 0 || index >= sections.size()) return;
+            sections.remove(index);
+            renumberGeneratedManualPieces();
+            saveLists();
+            renderManualMeasurements(false);
+            renderSections();
+            calculateAndDisplay(false);
+        });
+        return remove;
+    }
+
+    private void styleManualMeasurementInput(EditText field, String hint) {
+        field.setHint(hint);
+        field.setGravity(Gravity.CENTER);
+        field.setTextSize(18);
+        field.setMinWidth(0);
+        field.setMinimumWidth(0);
+        field.setPadding(dp(6), 0, dp(6), 0);
+        field.setBackground(manualMeasurementBoxBackground(Color.WHITE));
+    }
+
+    private TextView manualMeasurementTotalBox(String text) {
+        TextView total = label(text);
+        total.setTextSize(16);
+        total.setTypeface(Typeface.DEFAULT_BOLD);
+        total.setGravity(Gravity.CENTER);
+        total.setPadding(dp(4), 0, dp(4), 0);
+        total.setBackground(manualMeasurementBoxBackground(Color.rgb(239, 230, 220)));
+        return total;
+    }
+
+    private android.graphics.drawable.GradientDrawable manualMeasurementBoxBackground(int color) {
+        android.graphics.drawable.GradientDrawable background =
+                new android.graphics.drawable.GradientDrawable();
+        background.setColor(color);
+        background.setCornerRadius(dp(4));
+        background.setStroke(dp(1), Color.rgb(91, 58, 41));
+        return background;
+    }
+
+    private LinearLayout.LayoutParams manualMeasurementColumnParams(int leftMargin, int rightMargin) {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(58), 1f);
+        params.setMargins(leftMargin, dp(4), rightMargin, dp(4));
+        return params;
     }
 
     private boolean commitPendingManualMeasurement(boolean focusNewPiece) {
@@ -1147,17 +1258,12 @@ public class MainActivity extends Activity {
                 "Manual measurement total: " + number.format(total) + " sq ft");
     }
 
-    private String manualPieceResult(double length, double width, double quantity) {
-        String quantityPart = quantity == 1
+    private String manualPieceTotal(double length, double width, double quantity) {
+        String quantityLabel = quantity == 1
                 ? ""
-                : " × " + measurementValue(quantity);
-        return "Piece square footage: "
-                + measurementValue(length)
-                + " × " + measurementValue(width)
-                + quantityPart
-                + " ÷ 144 = "
-                + number.format((length * width * quantity) / 144.0)
-                + " sq ft";
+                : " ×" + measurementValue(quantity);
+        return number.format((length * width * quantity) / 144.0)
+                + "\nsq ft" + quantityLabel;
     }
 
     private void renumberGeneratedManualPieces() {
@@ -1991,11 +2097,14 @@ public class MainActivity extends Activity {
     private String drawingEstimateSummary() {
         if (aiDrawingExplanation.isEmpty()) return "";
         String result = aiDrawingCanCalculate
-                ? "\nAI drawing estimate: " + number.format(aiDrawingSquareFeet) + " sq ft"
+                ? (aiDrawingEditedByUser ? "\nEdited drawing estimate: " : "\nAI drawing estimate: ")
+                + number.format(aiDrawingSquareFeet) + " sq ft"
                 : "\nAI drawing: Square footage could not be calculated";
         return result
-                + "\nAI confidence: " + aiDrawingConfidence
-                + "\nAI calculation: " + aiDrawingExplanation
+                + (aiDrawingEditedByUser
+                ? "\nDrawing measurements: edited by user"
+                : "\nAI confidence: " + aiDrawingConfidence)
+                + "\nDrawing calculation: " + aiDrawingExplanation
                 + (aiDrawingMissingInformation.isEmpty()
                 ? ""
                 : "\nMissing drawing information: " + aiDrawingMissingInformation);
@@ -2203,6 +2312,7 @@ public class MainActivity extends Activity {
                 String confidence = response.optString("confidence", "low");
                 String explanation = response.optString("explanation", "");
                 String missingInformation = response.optString("missing_information", "");
+                JSONArray calculationParts = response.optJSONArray("calculation_parts");
                 JSONObject verificationDrawing = response.optJSONObject("verification_drawing");
                 runOnUiThread(() -> {
                     if (requestId != drawingAnalysisRequestId) return;
@@ -2213,6 +2323,7 @@ public class MainActivity extends Activity {
                             confidence,
                             explanation,
                             missingInformation,
+                            calculationParts,
                             verificationDrawing);
                 });
             } catch (Exception e) {
@@ -2362,6 +2473,8 @@ public class MainActivity extends Activity {
         aiDrawingExplanation = "";
         aiDrawingMissingInformation = "";
         aiDrawingCanCalculate = false;
+        aiDrawingEditedByUser = false;
+        aiDrawingCalculationParts = null;
         aiVerificationDrawing = null;
         verificationDrawingView.clearDrawing();
         verificationDrawingView.setVisibility(View.GONE);
@@ -2551,6 +2664,30 @@ public class MainActivity extends Activity {
         return label;
     }
 
+    private void updateDrawingStatusText() {
+        if (drawingStatus == null) return;
+        StringBuilder status = new StringBuilder();
+        if (aiDrawingCanCalculate) {
+            status.append(aiDrawingEditedByUser ? "Edited estimate: " : "AI estimate: ")
+                    .append(number.format(aiDrawingSquareFeet))
+                    .append(" sq ft");
+        } else {
+            status.append("AI could not calculate the square footage.");
+        }
+        if (aiDrawingEditedByUser) {
+            status.append("\nMeasurements edited by you");
+        } else if (!aiDrawingConfidence.isEmpty()) {
+            status.append("\nConfidence: ").append(aiDrawingConfidence);
+        }
+        if (!aiDrawingExplanation.isEmpty()) {
+            status.append("\n").append(aiDrawingExplanation);
+        }
+        if (!aiDrawingMissingInformation.isEmpty()) {
+            status.append("\nMissing information: ").append(aiDrawingMissingInformation);
+        }
+        drawingStatus.setText(status.toString());
+    }
+
     private void showDrawingResult(
             int requestId,
             boolean canCalculate,
@@ -2558,30 +2695,750 @@ public class MainActivity extends Activity {
             String confidence,
             String explanation,
             String missingInformation,
+            JSONArray calculationParts,
             JSONObject verificationDrawing) {
         aiDrawingCanCalculate = canCalculate;
         aiDrawingSquareFeet = canCalculate ? Math.max(0, squareFeet) : 0;
         aiDrawingConfidence = confidence;
         aiDrawingExplanation = explanation;
         aiDrawingMissingInformation = missingInformation;
+        aiDrawingEditedByUser = false;
+        aiDrawingCalculationParts = calculationParts;
         aiVerificationDrawing = verificationDrawing;
         if (verificationDrawing != null) {
             verificationDrawingView.setVerificationDrawing(verificationDrawing);
         } else {
             verificationDrawingView.clearDrawing();
         }
-        String result = canCalculate
-                ? "AI estimate: " + number.format(aiDrawingSquareFeet) + " sq ft"
-                : "AI could not calculate square footage from this drawing.";
-        result += "\nConfidence: " + confidence;
-        if (!explanation.isEmpty()) result += "\n" + explanation;
-        if (!missingInformation.isEmpty()) {
-            result += "\nMissing information: " + missingInformation;
-        }
-        result += "\nVerify all dimensions before pricing.";
-        drawingStatus.setText(result);
+        updateDrawingStatusText();
         finishDrawingProgress(requestId);
         showStep();
+    }
+
+    private void showVerificationEditor() {
+        if (aiVerificationDrawing == null) {
+            Toast.makeText(this, "There is no AI redraw to edit yet.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (drawingEditDialog != null) drawingEditDialog.dismiss();
+
+        final JSONObject workingDrawing;
+        try {
+            workingDrawing = new JSONObject(aiVerificationDrawing.toString());
+        } catch (Exception e) {
+            Toast.makeText(this, "The redraw could not be opened for editing.", Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(Color.rgb(248, 246, 243));
+
+        LinearLayout toolbar = new LinearLayout(this);
+        toolbar.setOrientation(LinearLayout.HORIZONTAL);
+        toolbar.setGravity(Gravity.CENTER_VERTICAL);
+        toolbar.setPadding(dp(10), dp(7), dp(8), dp(7));
+        toolbar.setBackgroundColor(Color.rgb(91, 58, 41));
+
+        TextView title = new TextView(this);
+        title.setText("Edit AI redraw");
+        title.setTextColor(Color.WHITE);
+        title.setTextSize(18);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        toolbar.addView(title, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        Button cancel = compactDialogButton("Cancel");
+        Button save = compactDialogButton("Save");
+        toolbar.addView(cancel);
+        toolbar.addView(save);
+        root.addView(toolbar, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        ScrollView editorScroll = new ScrollView(this);
+        editorScroll.setFillViewport(true);
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(14), dp(10), dp(14), dp(24));
+        editorScroll.addView(content, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+        root.addView(editorScroll, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        TextView instructions = label(
+                "Change a number below to correct the displayed dimension and square-foot total. "
+                        + "The outline is a verification guide. Optional labels are the only words placed on the redraw.");
+        instructions.setTextSize(15);
+        content.addView(instructions);
+
+        VerificationDrawingView preview = new VerificationDrawingView(this);
+        preview.setVerificationDrawing(workingDrawing);
+        content.addView(preview, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(300)));
+
+        content.addView(editorSectionTitle("Dimensions in inches"));
+        JSONArray dimensions = workingDrawing.optJSONArray("dimensions");
+        ArrayList<EditText> dimensionFields = new ArrayList<>();
+        ArrayList<Double> originalDimensionValues = new ArrayList<>();
+        ArrayList<Integer> dimensionIndexes = new ArrayList<>();
+        if (dimensions == null || dimensions.length() == 0) {
+            content.addView(label("No editable dimensions were found."));
+        } else {
+            for (int i = 0; i < Math.min(dimensions.length(), 50); i++) {
+                final JSONObject dimension = dimensions.optJSONObject(i);
+                if (dimension == null) continue;
+                final double originalValue = dimension.optDouble("value_inches", 0);
+                content.addView(label(dimensionEditorDescription(
+                        dimension,
+                        workingDrawing,
+                        dimensionFields.size() + 1)));
+                EditText field = input("Dimension in inches", decimalInput());
+                field.setText(measurementValue(originalValue));
+                field.setSelectAllOnFocus(true);
+                field.setImeOptions(EditorInfo.IME_ACTION_NEXT);
+                field.addTextChangedListener(new TextWatcher() {
+                    @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+                    @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                        double entered = positiveDrawingValue(s.toString());
+                        if (entered <= 0) return;
+                        try {
+                            dimension.put("value_inches", entered);
+                            dimension.put("label", formatDrawingDimension(entered));
+                            preview.invalidate();
+                        } catch (Exception ignored) {
+                        }
+                    }
+                    @Override public void afterTextChanged(Editable s) {}
+                });
+                content.addView(field);
+                dimensionFields.add(field);
+                originalDimensionValues.add(originalValue);
+                dimensionIndexes.add(i);
+            }
+        }
+
+        content.addView(editorSectionTitle("Optional labels"));
+        TextView labelHelp = label(
+                "Leave these blank for a numbers-only redraw. Type a short name such as Island only where you want it shown.");
+        labelHelp.setTextSize(15);
+        content.addView(labelHelp);
+
+        JSONArray shapes = workingDrawing.optJSONArray("shapes");
+        ArrayList<EditText> shapeLabelFields = new ArrayList<>();
+        ArrayList<Integer> editableShapeIndexes = new ArrayList<>();
+        if (shapes != null) {
+            for (int i = 0; i < Math.min(shapes.length(), 24); i++) {
+                final JSONObject shape = shapes.optJSONObject(i);
+                if (shape == null || "backsplash".equals(shape.optString("kind"))) continue;
+                content.addView(label(shapeEditorDescription(
+                        shape,
+                        workingDrawing,
+                        editableShapeIndexes.size() + 1)));
+                EditText field = input(
+                        "Optional label, for example Island",
+                        InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+                field.setText(shape.optString("user_label", ""));
+                field.setSingleLine(true);
+                field.setImeOptions(EditorInfo.IME_ACTION_NEXT);
+                field.addTextChangedListener(new TextWatcher() {
+                    @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+                    @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                        try {
+                            String clean = cleanDrawingLabel(s.toString());
+                            if (clean.isEmpty()) shape.remove("user_label");
+                            else shape.put("user_label", clean);
+                            preview.invalidate();
+                        } catch (Exception ignored) {
+                        }
+                    }
+                    @Override public void afterTextChanged(Editable s) {}
+                });
+                content.addView(field);
+                editableShapeIndexes.add(i);
+                shapeLabelFields.add(field);
+            }
+        }
+        if (editableShapeIndexes.isEmpty()) {
+            content.addView(label("No countertop pieces or openings were available for a custom label."));
+        }
+
+        cancel.setOnClickListener(v -> dialog.dismiss());
+        save.setOnClickListener(v -> saveVerificationEdits(
+                dialog,
+                dimensionFields,
+                originalDimensionValues,
+                dimensionIndexes,
+                editableShapeIndexes,
+                shapeLabelFields));
+        dialog.setOnDismissListener(ignored -> {
+            hideKeyboard();
+            if (drawingEditDialog == dialog) drawingEditDialog = null;
+        });
+        dialog.setContentView(root);
+        dialog.show();
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(Color.rgb(248, 246, 243)));
+            window.setLayout(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT);
+        }
+        drawingEditDialog = dialog;
+    }
+
+    private Button compactDialogButton(String text) {
+        Button button = new Button(this);
+        button.setText(text);
+        button.setAllCaps(false);
+        button.setTextSize(13);
+        button.setTextColor(Color.rgb(91, 58, 41));
+        button.setBackgroundColor(Color.rgb(239, 230, 220));
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(76), dp(44));
+        params.setMargins(dp(5), 0, 0, 0);
+        button.setLayoutParams(params);
+        return button;
+    }
+
+    private TextView editorSectionTitle(String text) {
+        TextView title = sectionHeader(text);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        params.setMargins(0, dp(14), 0, dp(4));
+        title.setLayoutParams(params);
+        return title;
+    }
+
+    private void saveVerificationEdits(
+            Dialog dialog,
+            ArrayList<EditText> dimensionFields,
+            ArrayList<Double> originalDimensionValues,
+            ArrayList<Integer> dimensionIndexes,
+            ArrayList<Integer> editableShapeIndexes,
+            ArrayList<EditText> shapeLabelFields) {
+        if (aiVerificationDrawing == null) {
+            dialog.dismiss();
+            Toast.makeText(this, "The AI redraw is no longer available.", Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        final JSONObject candidateDrawing;
+        final JSONArray candidateParts;
+        try {
+            candidateDrawing = new JSONObject(aiVerificationDrawing.toString());
+            candidateParts = aiDrawingCalculationParts == null
+                    ? new JSONArray()
+                    : new JSONArray(aiDrawingCalculationParts.toString());
+        } catch (Exception e) {
+            Toast.makeText(this, "The redraw changes could not be prepared.", Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        JSONArray dimensions = candidateDrawing.optJSONArray("dimensions");
+        if (dimensions == null) dimensions = new JSONArray();
+        if (dimensionFields.size() != originalDimensionValues.size()
+                || dimensionFields.size() != dimensionIndexes.size()) {
+            Toast.makeText(this, "The redraw fields could not be matched.", Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        // Validate every field before changing either the drawing or its calculation candidate.
+        ArrayList<Double> enteredDimensionValues = new ArrayList<>();
+        for (int fieldIndex = 0; fieldIndex < dimensionFields.size(); fieldIndex++) {
+            EditText field = dimensionFields.get(fieldIndex);
+            double entered = positiveDrawingValue(field.getText().toString());
+            if (entered <= 0 || entered > 10000) {
+                field.requestFocus();
+                Toast.makeText(
+                        this,
+                        "Enter every dimension as a number greater than 0 and no more than 10,000 inches.",
+                        Toast.LENGTH_LONG).show();
+                return;
+            }
+            enteredDimensionValues.add(entered);
+        }
+
+        ArrayList<String> enteredLabels = new ArrayList<>();
+        for (int i = 0; i < shapeLabelFields.size(); i++) {
+            String labelText = cleanDrawingLabel(shapeLabelFields.get(i).getText().toString());
+            if (labelText.length() > 30) {
+                shapeLabelFields.get(i).requestFocus();
+                Toast.makeText(this, "Keep each drawing label to 30 characters or fewer.", Toast.LENGTH_LONG).show();
+                return;
+            }
+            enteredLabels.add(labelText);
+        }
+
+        // Duplicate arrows that control the same formula value must receive the same correction.
+        HashMap<String, Double> changedTargets = new HashMap<>();
+        boolean calculationChanged = false;
+        for (int fieldIndex = 0; fieldIndex < dimensionFields.size(); fieldIndex++) {
+            JSONObject dimension = dimensions.optJSONObject(dimensionIndexes.get(fieldIndex));
+            if (dimension == null) {
+                Toast.makeText(this, "One redraw dimension is no longer available.", Toast.LENGTH_LONG).show();
+                return;
+            }
+            double entered = enteredDimensionValues.get(fieldIndex);
+            double original = originalDimensionValues.get(fieldIndex);
+            if (Math.abs(entered - original) <= 0.0001) continue;
+            String role = dimension.optString("role", "other");
+            JSONArray partIds = dimension.optJSONArray("part_ids");
+            boolean affectsCalculation = !"other".equals(role)
+                    && partIds != null
+                    && partIds.length() > 0;
+            if (affectsCalculation && candidateParts.length() == 0) {
+                dimensionFields.get(fieldIndex).requestFocus();
+                Toast.makeText(
+                        this,
+                        "Re-run the AI analysis before changing a calculated dimension.",
+                        Toast.LENGTH_LONG).show();
+                return;
+            }
+            if (affectsCalculation
+                    && !registerChangedDimensionTargets(changedTargets, dimension, entered)) {
+                dimensionFields.get(fieldIndex).requestFocus();
+                Toast.makeText(
+                        this,
+                        "Two fields control the same measurement. Enter the same number in both fields.",
+                        Toast.LENGTH_LONG).show();
+                return;
+            }
+            calculationChanged = calculationChanged || affectsCalculation;
+        }
+
+        for (int fieldIndex = 0; fieldIndex < dimensionFields.size(); fieldIndex++) {
+            JSONObject dimension = dimensions.optJSONObject(dimensionIndexes.get(fieldIndex));
+            if (dimension == null) continue;
+            double entered = enteredDimensionValues.get(fieldIndex);
+            double original = originalDimensionValues.get(fieldIndex);
+            if (Math.abs(entered - original) > 0.0001) {
+                String role = dimension.optString("role", "other");
+                JSONArray partIds = dimension.optJSONArray("part_ids");
+                boolean affectsCalculation = !"other".equals(role)
+                        && partIds != null
+                        && partIds.length() > 0;
+                int updatedParts = updatePartsFromDimension(candidateParts, dimension, entered);
+                if (affectsCalculation && updatedParts == 0) {
+                    dimensionFields.get(fieldIndex).requestFocus();
+                    Toast.makeText(
+                            this,
+                            "That dimension is not linked to a calculation piece. Re-run the AI analysis.",
+                            Toast.LENGTH_LONG).show();
+                    return;
+                }
+            }
+            try {
+                dimension.put("value_inches", entered);
+                dimension.put("label", formatDrawingDimension(entered));
+            } catch (Exception ignored) {
+            }
+        }
+
+        double updatedSquareFeet = aiDrawingSquareFeet;
+        String updatedExplanation = aiDrawingExplanation;
+        if (calculationChanged) {
+            synchronizeLinkedDrawingDimensions(candidateDrawing, candidateParts);
+            if (!changedDimensionTargetsMatchDrawing(
+                    candidateDrawing,
+                    candidateParts,
+                    changedTargets)
+                    || !drawingCoversCalculationParts(candidateDrawing, candidateParts)) {
+                Toast.makeText(
+                        this,
+                        "Those edits made two linked measurements disagree. Check the dimension fields.",
+                        Toast.LENGTH_LONG).show();
+                return;
+            }
+            updatedSquareFeet = recalculateDrawingSquareFeet(candidateParts);
+            if (updatedSquareFeet <= 0) {
+                Toast.makeText(
+                        this,
+                        "Those edits do not produce a positive countertop area. Check the dimensions.",
+                        Toast.LENGTH_LONG).show();
+                return;
+            }
+            updatedExplanation = buildEditedDrawingExplanation(candidateParts, updatedSquareFeet);
+        }
+
+        JSONArray candidateShapes = candidateDrawing.optJSONArray("shapes");
+        if (shapeLabelFields.size() != editableShapeIndexes.size()
+                || candidateShapes == null && !shapeLabelFields.isEmpty()) {
+            Toast.makeText(this, "The redraw label fields could not be matched.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        for (int i = 0; i < enteredLabels.size(); i++) {
+            JSONObject shape = candidateShapes.optJSONObject(editableShapeIndexes.get(i));
+            if (shape == null) {
+                Toast.makeText(this, "One redraw label location is no longer available.", Toast.LENGTH_LONG).show();
+                return;
+            }
+            try {
+                String labelText = enteredLabels.get(i);
+                if (labelText.isEmpty()) shape.remove("user_label");
+                else shape.put("user_label", labelText);
+            } catch (Exception ignored) {
+            }
+        }
+
+        if (calculationChanged) {
+            aiDrawingSquareFeet = updatedSquareFeet;
+            aiDrawingCanCalculate = true;
+            aiDrawingEditedByUser = true;
+            aiDrawingExplanation = updatedExplanation;
+        }
+        aiDrawingCalculationParts = candidateParts;
+        aiVerificationDrawing = candidateDrawing;
+        verificationDrawingView.setVerificationDrawing(candidateDrawing);
+        updateDrawingStatusText();
+        calculateAndDisplay(false);
+        dialog.dismiss();
+        showStep();
+        Toast.makeText(this, "Redraw saved.", Toast.LENGTH_SHORT).show();
+    }
+
+    private double positiveDrawingValue(String text) {
+        try {
+            double parsed = Double.parseDouble(text.trim());
+            return isFiniteDrawingNumber(parsed) && parsed > 0 ? parsed : 0;
+        } catch (Exception ignored) {
+            return 0;
+        }
+    }
+
+    private boolean isFiniteDrawingNumber(double value) {
+        return !Double.isNaN(value) && !Double.isInfinite(value);
+    }
+
+    private String cleanDrawingLabel(String text) {
+        return text == null ? "" : text.trim().replaceAll("\\s+", " ");
+    }
+
+    private String formatDrawingDimension(double inches) {
+        return measurementValue(inches) + "\"";
+    }
+
+    private String dimensionEditorDescription(
+            JSONObject dimension,
+            JSONObject drawing,
+            int numberIndex) {
+        double canvasWidth = drawing.optDouble("canvas_width", 1000);
+        double canvasHeight = drawing.optDouble("canvas_height", 700);
+        double x1 = dimension.optDouble("x1", 0);
+        double y1 = dimension.optDouble("y1", 0);
+        double x2 = dimension.optDouble("x2", 0);
+        double y2 = dimension.optDouble("y2", 0);
+        String position = drawingPosition((x1 + x2) / 2, (y1 + y2) / 2, canvasWidth, canvasHeight);
+        String direction = Math.abs(x2 - x1) >= Math.abs(y2 - y1)
+                ? "horizontal"
+                : "vertical";
+        String role = dimension.optString("role", "other");
+        String purpose;
+        if ("length".equals(role)) purpose = "length";
+        else if ("width".equals(role)) purpose = "width";
+        else if ("both".equals(role)) purpose = "length and width";
+        else purpose = "reference only";
+        return "Dimension " + numberIndex + " — " + position + " " + direction + " " + purpose;
+    }
+
+    private String shapeEditorDescription(JSONObject shape, JSONObject drawing, int numberIndex) {
+        JSONArray points = shape.optJSONArray("points");
+        double centerX = 0;
+        double centerY = 0;
+        int count = 0;
+        if (points != null) {
+            for (int i = 0; i < Math.min(points.length(), 16); i++) {
+                JSONObject point = points.optJSONObject(i);
+                if (point == null) continue;
+                centerX += point.optDouble("x", 0);
+                centerY += point.optDouble("y", 0);
+                count++;
+            }
+        }
+        if (count > 0) {
+            centerX /= count;
+            centerY /= count;
+        }
+        double canvasWidth = drawing.optDouble("canvas_width", 1000);
+        double canvasHeight = drawing.optDouble("canvas_height", 700);
+        String kind = "opening".equals(shape.optString("kind")) ? "opening" : "countertop piece";
+        return "Optional label " + numberIndex + " — "
+                + drawingPosition(centerX, centerY, canvasWidth, canvasHeight)
+                + " " + kind;
+    }
+
+    private String drawingPosition(
+            double centerX,
+            double centerY,
+            double canvasWidth,
+            double canvasHeight) {
+        String vertical = centerY < canvasHeight * 0.36
+                ? "top"
+                : centerY > canvasHeight * 0.64 ? "bottom" : "middle";
+        String horizontal = centerX < canvasWidth * 0.36
+                ? "left"
+                : centerX > canvasWidth * 0.64 ? "right" : "center";
+        return vertical + "-" + horizontal;
+    }
+
+    private boolean registerChangedDimensionTargets(
+            HashMap<String, Double> changedTargets,
+            JSONObject dimension,
+            double entered) {
+        String role = dimension.optString("role", "other");
+        JSONArray partIds = dimension.optJSONArray("part_ids");
+        if (partIds == null) return true;
+        for (int i = 0; i < Math.min(partIds.length(), 12); i++) {
+            String partId = partIds.optString(i, "").trim();
+            if (partId.isEmpty()) continue;
+            if (("length".equals(role) || "both".equals(role))
+                    && !registerChangedDimensionTarget(
+                    changedTargets,
+                    drawingTargetKey(partId, "length"),
+                    entered)) return false;
+            if (("width".equals(role) || "both".equals(role))
+                    && !registerChangedDimensionTarget(
+                    changedTargets,
+                    drawingTargetKey(partId, "width"),
+                    entered)) return false;
+        }
+        return true;
+    }
+
+    private boolean registerChangedDimensionTarget(
+            HashMap<String, Double> changedTargets,
+            String key,
+            double entered) {
+        Double existing = changedTargets.get(key);
+        if (existing != null && Math.abs(existing - entered) > 0.05) return false;
+        changedTargets.put(key, entered);
+        return true;
+    }
+
+    private String drawingTargetKey(String partId, String property) {
+        return partId + "\u0000" + property;
+    }
+
+    private boolean changedDimensionTargetsMatchDrawing(
+            JSONObject drawing,
+            JSONArray parts,
+            HashMap<String, Double> changedTargets) {
+        JSONArray dimensions = drawing.optJSONArray("dimensions");
+        if (dimensions == null) return changedTargets.isEmpty();
+        for (int i = 0; i < Math.min(dimensions.length(), 50); i++) {
+            JSONObject dimension = dimensions.optJSONObject(i);
+            if (dimension == null) continue;
+            String role = dimension.optString("role", "other");
+            if ("other".equals(role)) continue;
+            double displayed = dimension.optDouble("value_inches", Double.NaN);
+            if (!isFiniteDrawingNumber(displayed) || displayed <= 0) return false;
+            JSONArray partIds = dimension.optJSONArray("part_ids");
+            if (partIds == null) continue;
+            for (int idIndex = 0; idIndex < Math.min(partIds.length(), 12); idIndex++) {
+                String partId = partIds.optString(idIndex, "");
+                JSONObject part = findDrawingCalculationPart(parts, partId);
+                if (part == null) continue;
+                if (("length".equals(role) || "both".equals(role))
+                        && changedTargets.containsKey(drawingTargetKey(partId, "length"))
+                        && Math.abs(displayed - part.optDouble("length_inches", Double.NaN)) > 0.05) {
+                    return false;
+                }
+                if (("width".equals(role) || "both".equals(role))
+                        && changedTargets.containsKey(drawingTargetKey(partId, "width"))
+                        && Math.abs(displayed - part.optDouble("width_inches", Double.NaN)) > 0.05) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    private boolean drawingCoversCalculationParts(JSONObject drawing, JSONArray parts) {
+        JSONArray dimensions = drawing.optJSONArray("dimensions");
+        if (dimensions == null || parts == null || parts.length() == 0) return false;
+        for (int partIndex = 0; partIndex < Math.min(parts.length(), 40); partIndex++) {
+            JSONObject part = parts.optJSONObject(partIndex);
+            if (part == null) return false;
+            String partId = part.optString("id", "");
+            String operation = part.optString("operation", "");
+            double length = part.optDouble("length_inches", Double.NaN);
+            double width = part.optDouble("width_inches", Double.NaN);
+            double quantityValue = part.optDouble("quantity", Double.NaN);
+            if (partId.isEmpty()
+                    || !("add".equals(operation) || "subtract".equals(operation))
+                    || !isFiniteDrawingNumber(length)
+                    || !isFiniteDrawingNumber(width)
+                    || !isFiniteDrawingNumber(quantityValue)
+                    || length <= 0
+                    || width <= 0
+                    || quantityValue <= 0) return false;
+            boolean hasLength = false;
+            boolean hasWidth = false;
+            for (int dimensionIndex = 0;
+                 dimensionIndex < Math.min(dimensions.length(), 50);
+                 dimensionIndex++) {
+                JSONObject dimension = dimensions.optJSONObject(dimensionIndex);
+                if (dimension == null || !dimensionContainsPartId(dimension, partId)) continue;
+                double displayed = dimension.optDouble("value_inches", Double.NaN);
+                String role = dimension.optString("role", "other");
+                if (("length".equals(role) || "both".equals(role))
+                        && Math.abs(displayed - length) <= 0.05) hasLength = true;
+                if (("width".equals(role) || "both".equals(role))
+                        && Math.abs(displayed - width) <= 0.05) hasWidth = true;
+            }
+            if (!hasLength || !hasWidth) return false;
+        }
+        return true;
+    }
+
+    private boolean dimensionContainsPartId(JSONObject dimension, String partId) {
+        JSONArray partIds = dimension.optJSONArray("part_ids");
+        if (partIds == null) return false;
+        for (int i = 0; i < Math.min(partIds.length(), 12); i++) {
+            if (partId.equals(partIds.optString(i, ""))) return true;
+        }
+        return false;
+    }
+
+    private int updatePartsFromDimension(
+            JSONArray parts,
+            JSONObject dimension,
+            double entered) {
+        String role = dimension.optString("role", "other");
+        if ("other".equals(role)) return 0;
+        JSONArray partIds = dimension.optJSONArray("part_ids");
+        if (partIds == null) return 0;
+        int updatedParts = 0;
+        for (int idIndex = 0; idIndex < Math.min(partIds.length(), 12); idIndex++) {
+            String id = partIds.optString(idIndex, "");
+            JSONObject part = findDrawingCalculationPart(parts, id);
+            if (part == null) continue;
+            try {
+                if ("length".equals(role) || "both".equals(role)) {
+                    part.put("length_inches", entered);
+                }
+                if ("width".equals(role) || "both".equals(role)) {
+                    part.put("width_inches", entered);
+                }
+                updatedParts++;
+            } catch (Exception ignored) {
+            }
+        }
+        return updatedParts;
+    }
+
+    private JSONObject findDrawingCalculationPart(JSONArray parts, String id) {
+        if (id == null || id.trim().isEmpty()) return null;
+        for (int i = 0; i < Math.min(parts.length(), 40); i++) {
+            JSONObject part = parts.optJSONObject(i);
+            if (part != null && id.equals(part.optString("id"))) return part;
+        }
+        return null;
+    }
+
+    private void synchronizeLinkedDrawingDimensions(JSONObject drawing, JSONArray parts) {
+        JSONArray dimensions = drawing.optJSONArray("dimensions");
+        if (dimensions == null) return;
+        for (int i = 0; i < Math.min(dimensions.length(), 50); i++) {
+            JSONObject dimension = dimensions.optJSONObject(i);
+            if (dimension == null) continue;
+            double linkedValue = linkedDrawingDimensionValue(parts, dimension);
+            if (!isFiniteDrawingNumber(linkedValue) || linkedValue <= 0) continue;
+            try {
+                dimension.put("value_inches", linkedValue);
+                dimension.put("label", formatDrawingDimension(linkedValue));
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    private double linkedDrawingDimensionValue(JSONArray parts, JSONObject dimension) {
+        String role = dimension.optString("role", "other");
+        if ("other".equals(role)) return Double.NaN;
+        JSONArray partIds = dimension.optJSONArray("part_ids");
+        if (partIds == null || partIds.length() == 0) return Double.NaN;
+        double result = Double.NaN;
+        for (int i = 0; i < Math.min(partIds.length(), 12); i++) {
+            JSONObject part = findDrawingCalculationPart(parts, partIds.optString(i, ""));
+            if (part == null) return Double.NaN;
+            double candidate;
+            if ("length".equals(role)) {
+                candidate = part.optDouble("length_inches", Double.NaN);
+            } else if ("width".equals(role)) {
+                candidate = part.optDouble("width_inches", Double.NaN);
+            } else {
+                double length = part.optDouble("length_inches", Double.NaN);
+                double width = part.optDouble("width_inches", Double.NaN);
+                if (!isFiniteDrawingNumber(length)
+                        || !isFiniteDrawingNumber(width)
+                        || Math.abs(length - width) > 0.05) return Double.NaN;
+                candidate = length;
+            }
+            if (!isFiniteDrawingNumber(candidate) || candidate <= 0) return Double.NaN;
+            if (isFiniteDrawingNumber(result) && Math.abs(result - candidate) > 0.05) {
+                return Double.NaN;
+            }
+            result = candidate;
+        }
+        return result;
+    }
+
+    private double recalculateDrawingSquareFeet(JSONArray parts) {
+        if (parts == null || parts.length() == 0) return 0;
+        double squareInches = 0;
+        for (int i = 0; i < Math.min(parts.length(), 40); i++) {
+            JSONObject part = parts.optJSONObject(i);
+            if (part == null) return 0;
+            double length = part.optDouble("length_inches", 0);
+            double width = part.optDouble("width_inches", 0);
+            double quantityValue = part.optDouble("quantity", 1);
+            if (!isFiniteDrawingNumber(length)
+                    || !isFiniteDrawingNumber(width)
+                    || !isFiniteDrawingNumber(quantityValue)
+                    || length <= 0
+                    || width <= 0
+                    || quantityValue <= 0) return 0;
+            double area = length * width * quantityValue;
+            squareInches += "subtract".equals(part.optString("operation")) ? -area : area;
+        }
+        if (!isFiniteDrawingNumber(squareInches) || squareInches <= 0) return 0;
+        return Math.round((squareInches / 144.0) * 100.0) / 100.0;
+    }
+
+    private String buildEditedDrawingExplanation(JSONArray parts, double squareFeet) {
+        StringBuilder explanation = new StringBuilder("Edited measurements: ");
+        int added = 0;
+        int subtracted = 0;
+        for (int i = 0; i < Math.min(parts.length(), 40); i++) {
+            JSONObject part = parts.optJSONObject(i);
+            if (part == null) continue;
+            boolean subtract = "subtract".equals(part.optString("operation"));
+            String genericName = subtract
+                    ? "Opening " + (++subtracted)
+                    : "Piece " + (++added);
+            double length = part.optDouble("length_inches", 0);
+            double width = part.optDouble("width_inches", 0);
+            double quantityValue = part.optDouble("quantity", 1);
+            double area = length * width * quantityValue;
+            if (i > 0) explanation.append("; ");
+            explanation.append(subtract ? "subtract " : "")
+                    .append(genericName)
+                    .append(" ")
+                    .append(measurementValue(length))
+                    .append(" × ")
+                    .append(measurementValue(width));
+            if (Math.abs(quantityValue - 1) > 0.0001) {
+                explanation.append(" × ").append(measurementValue(quantityValue));
+            }
+            explanation.append(" = ").append(measurementValue(area)).append(" sq in");
+        }
+        explanation.append(". Total = ")
+                .append(number.format(squareFeet))
+                .append(" sq ft. Verify every edited dimension before pricing.");
+        return explanation.toString();
     }
 
     @Override
@@ -2841,11 +3698,6 @@ public class MainActivity extends Activity {
         ovalVanitySinkLocations.setText("");
         anotherSinkQuantity.setText("0");
         undecidedSinkQuantity.setText("0");
-        aiDrawingSquareFeet = 0;
-        aiDrawingConfidence = "";
-        aiDrawingExplanation = "";
-        aiDrawingMissingInformation = "";
-        aiDrawingCanCalculate = false;
         roomPhoto.setImageDrawable(null);
         drawingPhoto.setImageDrawable(null);
         photoStatus.setText("No photo selected.");
@@ -3899,9 +4751,9 @@ public class MainActivity extends Activity {
             canvas.drawPath(path, fillPaint);
             canvas.drawPath(path, linePaint);
 
-            String label = shape.optString("label", "").trim();
-            // Do not put an opaque label box over a thin backsplash. Its dimension arrows and
-            // the tan legend identify it without hiding the actual piece.
+            // Model-written shape labels can contain guesses or warning sentences. Only draw a
+            // short label that the user deliberately added in the redraw editor.
+            String label = shape.optString("user_label", "").trim();
             if (!label.isEmpty() && !"backsplash".equals(kind)) {
                 textPaint.setTextSize(32f);
                 drawTextWithBackground(canvas, label, centerX, centerY + 13f);
