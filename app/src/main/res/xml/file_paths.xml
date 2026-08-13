@@ -4,4 +4,5 @@
     <cache-path name="countertop_photos" path="countertop_photos/" />
     <files-path name="saved_drawing_photos" path="drawing_photos/" />
     <files-path name="saved_countertop_photos" path="countertop_photos/" />
+    <files-path name="quote_pdfs" path="quote_pdfs/" />
 </paths>
