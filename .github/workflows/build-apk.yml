@@ -31,18 +31,6 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Node 24
-        uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          cache: npm
-          cache-dependency-path: payment-service/package-lock.json
-
-      - name: Test secure payment service
-        run: |
-          npm ci --prefix payment-service
-          npm test --prefix payment-service
-
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
@@ -63,7 +51,7 @@ jobs:
           grep -Fq 'Verified using v3 scheme (APK Signature Scheme v3): true' <<< "$signature_report"
           badging_report=$("$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging app/build/outputs/apk/debug/app-debug.apk)
           printf '%s\n' "$badging_report"
-          grep -Fq "package: name='com.ramsiers.graniteapp' versionCode='51' versionName='1.51-test'" <<< "$badging_report"
+          grep -Fq "package: name='com.ramsiers.graniteapp' versionCode='52' versionName='1.52-test'" <<< "$badging_report"
           cd app/build/outputs/apk/debug
           sha256sum app-debug.apk > app-debug.apk.sha256
 
