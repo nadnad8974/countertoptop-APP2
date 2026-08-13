@@ -93,6 +93,33 @@ public class DrawingRecordTest {
                 result.calculationParts.getJSONObject(0).getString("id"));
     }
 
+    @Test
+    public void measuredFallbackKeepsSourcePositionAndOrientation() throws Exception {
+        JSONObject positionedPart = part("countertop", "add", 100, 25.5)
+                .put("source_x", 125)
+                .put("source_y", 80)
+                .put("source_width", 420)
+                .put("source_height", 105);
+        JSONObject response = new JSONObject()
+                .put("square_feet", 17.71)
+                .put("can_calculate", true)
+                .put("calculation_parts", new JSONArray().put(positionedPart));
+
+        DrawingRecord result = DrawingRecord.fromServerResponse(
+                "content://drawing/positioned",
+                5,
+                response);
+        JSONArray points = result.verificationDrawing
+                .getJSONArray("shapes")
+                .getJSONObject(0)
+                .getJSONArray("points");
+
+        assertEquals(125, points.getJSONObject(0).getDouble("x"), 0.001);
+        assertEquals(80, points.getJSONObject(0).getDouble("y"), 0.001);
+        assertEquals(545, points.getJSONObject(1).getDouble("x"), 0.001);
+        assertEquals(185, points.getJSONObject(2).getDouble("y"), 0.001);
+    }
+
     private static JSONObject part(
             String feature,
             String operation,

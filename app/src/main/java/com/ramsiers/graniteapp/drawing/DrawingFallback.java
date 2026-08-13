@@ -86,6 +86,17 @@ public final class DrawingFallback {
             JSONArray shapes,
             JSONArray dimensions) throws Exception {
         int count = Math.min(pieces.size(), 12);
+        boolean sourceLayoutAvailable = true;
+        for (int i = 0; i < count; i++) {
+            if (!hasSourceGeometry(pieces.get(i))) {
+                sourceLayoutAvailable = false;
+                break;
+            }
+        }
+        if (sourceLayoutAvailable) {
+            layoutPiecesFromSource(pieces, count, shapes, dimensions);
+            return;
+        }
         int columns = count <= 2 ? count : count <= 4 ? 2 : 3;
         int rows = (int) Math.ceil((double) count / columns);
         double cellWidth = 860.0 / columns;
@@ -110,6 +121,35 @@ public final class DrawingFallback {
             shapes.put(shape(part, part.left, part.top, part.right, part.bottom));
             addDimensions(dimensions, part, part.left, part.top, part.right, part.bottom);
         }
+    }
+
+    private static void layoutPiecesFromSource(
+            List<PartGeometry> pieces,
+            int count,
+            JSONArray shapes,
+            JSONArray dimensions) throws Exception {
+        for (int i = 0; i < count && shapes.length() < MAX_SHAPES; i++) {
+            PartGeometry part = pieces.get(i);
+            part.left = clamp(part.source.optDouble("source_x", 0), 0, CANVAS_WIDTH - 12);
+            part.top = clamp(part.source.optDouble("source_y", 0), 0, CANVAS_HEIGHT - 12);
+            part.right = clamp(
+                    part.left + part.source.optDouble("source_width", 0),
+                    part.left + 12,
+                    CANVAS_WIDTH);
+            part.bottom = clamp(
+                    part.top + part.source.optDouble("source_height", 0),
+                    part.top + 12,
+                    CANVAS_HEIGHT);
+            shapes.put(shape(part, part.left, part.top, part.right, part.bottom));
+            addDimensions(dimensions, part, part.left, part.top, part.right, part.bottom);
+        }
+    }
+
+    private static boolean hasSourceGeometry(PartGeometry part) {
+        return positive(part.source.optDouble("source_width", 0)) > 0
+                && positive(part.source.optDouble("source_height", 0)) > 0
+                && part.source.optDouble("source_x", -1) >= 0
+                && part.source.optDouble("source_y", -1) >= 0;
     }
 
     private static void layoutOpenings(
@@ -216,6 +256,10 @@ public final class DrawingFallback {
 
     private static double positive(double value) {
         return !Double.isNaN(value) && !Double.isInfinite(value) && value > 0 ? value : 0;
+    }
+
+    private static double clamp(double value, double minimum, double maximum) {
+        return Math.max(minimum, Math.min(maximum, value));
     }
 
     private static final class PartGeometry {

@@ -13,6 +13,8 @@ public final class DrawingApiRequest {
             request.put("image", imageDataUrl == null ? "" : imageDataUrl);
             request.put("include_verification_drawing", true);
             request.put("drawing_schema_version", 2);
+            request.put("preserve_source_layout", true);
+            request.put("preserve_source_orientation", true);
         } catch (Exception ignored) {
         }
         return request;

@@ -16,5 +16,7 @@ public class DrawingApiRequestTest {
         assertFalse(request.has("images"));
         assertTrue(request.getBoolean("include_verification_drawing"));
         assertEquals(2, request.getInt("drawing_schema_version"));
+        assertTrue(request.getBoolean("preserve_source_layout"));
+        assertTrue(request.getBoolean("preserve_source_orientation"));
     }
 }
