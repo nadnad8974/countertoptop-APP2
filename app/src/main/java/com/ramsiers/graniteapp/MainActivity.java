@@ -115,6 +115,7 @@ public class MainActivity extends Activity {
     private static final String PRICE_FAUCET = "price_faucet";
     private static final String PRICE_BASKET = "price_basket";
     private static final String PRICE_GRID = "price_grid";
+    private static final double WATERFALL_PRICE = 300.0;
     private static final String DEFAULT_PAGE_ORDER = "0,1,2,3,12,8,13,15,16,17,20,14,18,19,11,6,4";
     private static final String ALL_BUILT_IN_PAGES = "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,100,101,102,103,104,105,106";
     private static final int CUSTOM_PAGE_START = 1000;
@@ -973,7 +974,7 @@ public class MainActivity extends Activity {
         hideKeyboard();
         page.addView(questionTitle(questionForEdit(PAGE_WATERFALL)));
         addProductImage(R.drawable.waterfall_countertop, "Waterfall countertop example");
-        addHelp("Use 0 if you do not want a waterfall.");
+        addHelp("Waterfall sides are " + money(WATERFALL_PRICE) + " each. Use 0 if you do not want a waterfall.");
         addQuantityStepper(waterfallQuantity);
         detach(waterfallComments);
         page.addView(waterfallComments);
@@ -1634,6 +1635,10 @@ public class MainActivity extends Activity {
         printQuote.setOnClickListener(v -> printQuoteSummary());
         page.addView(printQuote);
 
+        Button textQuote = primaryButton("Text JPEG & payment link");
+        textQuote.setOnClickListener(v -> textQuoteSummary());
+        page.addView(textQuote);
+
         addInlineNavigation();
 
         Button reset = secondaryButton("Start a new customer");
@@ -1663,6 +1668,43 @@ public class MainActivity extends Activity {
             Toast.makeText(
                     this,
                     "The quote PDF could not be created. Please try again.",
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void textQuoteSummary() {
+        try {
+            Estimate estimate = calculateAndDisplay(false);
+            QuotePdfGenerator.Data data = buildQuotePdfData(estimate);
+            File quoteDirectory = new File(getFilesDir(), "quote_jpegs");
+            File quoteImage = new File(
+                    quoteDirectory,
+                    "Ramsiers-Final-Quote-" + safeFileName(text(customerName)) + ".jpg");
+            QuotePdfGenerator.createJpeg(quoteImage, data);
+            Uri imageUri = FileProvider.getUriForFile(
+                    this,
+                    getPackageName() + ".fileprovider",
+                    quoteImage);
+
+            String phone = customerPhone.getText().toString().trim();
+            String messageText = "Ramsier's Granite and Quartz\n"
+                    + "Your finished quote is attached.\n"
+                    + "Full amount due when the job is complete: " + money(estimate.total) + "\n"
+                    + "ACH payment link: Add the secure Stripe link here after the job is finished.";
+
+            Intent message = new Intent(Intent.ACTION_SEND);
+            message.setType("image/jpeg");
+            message.putExtra("address", phone);
+            message.putExtra("sms_body", messageText);
+            message.putExtra(Intent.EXTRA_TEXT, messageText);
+            message.putExtra(Intent.EXTRA_STREAM, imageUri);
+            message.setClipData(ClipData.newUri(getContentResolver(), "Ramsier's final quote", imageUri));
+            message.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(Intent.createChooser(message, "Text the customer's final quote"));
+        } catch (Exception exception) {
+            Toast.makeText(
+                    this,
+                    "The quote picture could not be created. Please try again.",
                     Toast.LENGTH_LONG).show();
         }
     }
@@ -1704,6 +1746,14 @@ public class MainActivity extends Activity {
         addQuantityPdfPriceRow(data, "Ramsier's faucets", faucetQuantity, PRICE_FAUCET, 225);
         addQuantityPdfPriceRow(data, "Basket drains", basketQuantity, PRICE_BASKET, 35);
         addQuantityPdfPriceRow(data, "Big grids", gridQuantity, PRICE_GRID, 70);
+        double waterfallCount = value(waterfallQuantity);
+        if (waterfallCount > 0) {
+            addPdfPriceRow(
+                    data,
+                    "Waterfall sides",
+                    quantityLabel(waterfallCount) + " × " + money(WATERFALL_PRICE),
+                    waterfallCount * WATERFALL_PRICE);
+        }
         if (value(sinkCharge) > 0) addPdfPriceRow(data, "Sink charge", "Additional sink charge", value(sinkCharge));
         if (value(edgeCharge) > 0) addPdfPriceRow(data, "Extra edge labor", "Additional labor", value(edgeCharge));
         if (value(tearOutCharge) > 0) addPdfPriceRow(data, "Tear-out", "Entered charge", value(tearOutCharge));
@@ -2503,6 +2553,7 @@ public class MainActivity extends Activity {
         double faucetTotal = value(faucetQuantity) * faucetPrice;
         double basketTotal = value(basketQuantity) * basketPrice;
         double gridTotal = value(gridQuantity) * gridPrice;
+        double waterfallTotal = value(waterfallQuantity) * WATERFALL_PRICE;
         double total = net * value(pricePerSqFt)
                 + value(sinkCharge)
                 + value(edgeCharge)
@@ -2512,7 +2563,8 @@ public class MainActivity extends Activity {
                 + edgeDetailTotal
                 + faucetTotal
                 + basketTotal
-                + gridTotal;
+                + gridTotal
+                + waterfallTotal;
 
         if (squareFootResult != null) squareFootResult.setText("Net square footage: " + number.format(net));
         if (totalResult != null) totalResult.setText("Estimated total: $" + number.format(total));
@@ -2546,6 +2598,7 @@ public class MainActivity extends Activity {
         double edgeTotal = "Eased and polished".equals(edgeDetail) ? 0 : value(edgeLinearFeet) * edgePrice;
         double basketTotal = value(basketQuantity) * basketPrice;
         double gridTotal = value(gridQuantity) * gridPrice;
+        double waterfallTotal = value(waterfallQuantity) * WATERFALL_PRICE;
         return "Cooktop or extra cutouts: " + number.format(value(cooktopCutoutQuantity))
                 + " × " + money(cooktopPrice) + " = " + money(cutoutTotal)
                 + "\nEdge detail: " + edgeDisplayName(edgeDetail)
@@ -2561,6 +2614,7 @@ public class MainActivity extends Activity {
                 + "\nBig grids: " + number.format(value(gridQuantity))
                 + " × " + money(gridPrice) + " = " + money(gridTotal)
                 + "\nWaterfall sides: " + number.format(value(waterfallQuantity))
+                + " × " + money(WATERFALL_PRICE) + " = " + money(waterfallTotal)
                 + "\nWaterfall comments: " + textOrNotProvided(waterfallComments)
                 + "\nCabinets in: " + yesNo(value(cabinetInQuantity) > 0)
                 + "\nCabinet date / notes: " + textOrNotProvided(cabinetsApproximateDate)

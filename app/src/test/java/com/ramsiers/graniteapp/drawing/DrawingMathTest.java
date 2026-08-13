@@ -7,6 +7,20 @@ import org.json.JSONObject;
 import org.junit.Test;
 
 public class DrawingMathTest {
+
+    @Test
+    public void threeTwentyFourByTwelveRectanglesTotalSixSquareFeet() throws Exception {
+        JSONArray parts = new JSONArray();
+        for (int i = 0; i < 3; i++) {
+            JSONObject part = new JSONObject();
+            part.put("length", 24);
+            part.put("width", 12);
+            part.put("quantity", 1);
+            parts.put(part);
+        }
+
+        assertEquals(6.0, DrawingMath.squareFeet(parts), 0.001);
+    }
     @Test
     public void rectangleConvertsInchesToSquareFeet() throws Exception {
         JSONArray parts = new JSONArray().put(part("counter", "add", 120, 25, 1));

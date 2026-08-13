@@ -18,5 +18,8 @@ public class DrawingApiRequestTest {
         assertEquals(2, request.getInt("drawing_schema_version"));
         assertTrue(request.getBoolean("preserve_source_layout"));
         assertTrue(request.getBoolean("preserve_source_orientation"));
+        assertTrue(request.getBoolean("rectangle_decomposition_required"));
+        assertTrue(request.getBoolean("use_dotted_lines_as_partition_guides"));
+        assertTrue(request.getBoolean("calculate_each_rectangle_separately"));
     }
 }

@@ -5,4 +5,5 @@
     <files-path name="saved_drawing_photos" path="drawing_photos/" />
     <files-path name="saved_countertop_photos" path="countertop_photos/" />
     <files-path name="quote_pdfs" path="quote_pdfs/" />
+    <files-path name="quote_jpegs" path="quote_jpegs/" />
 </paths>

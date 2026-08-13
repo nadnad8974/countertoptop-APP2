@@ -1,6 +1,7 @@
 package com.ramsiers.graniteapp.print;
 
 import android.graphics.Canvas;
+import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Typeface;
@@ -60,18 +61,7 @@ public final class QuotePdfGenerator {
         PdfDocument document = new PdfDocument();
         PdfDocument.Page page = document.startPage(
                 new PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, 1).create());
-        Canvas canvas = page.getCanvas();
-        canvas.drawColor(Color.WHITE);
-
-        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        int y = drawHeader(canvas, paint);
-        y = drawLocations(canvas, paint, y);
-        y = drawCustomer(canvas, paint, y + 6, data);
-        y = drawPricedOptions(canvas, paint, y + 7, data);
-        y = drawProjectOptions(canvas, paint, y + 7, data);
-        y = drawDrawingSummary(canvas, paint, y + 7, data);
-        y = drawSectionsAndSlabs(canvas, paint, y + 7, data);
-        drawFooter(canvas, paint, Math.min(y + 10, PAGE_HEIGHT - 21));
+        drawPage(page.getCanvas(), data);
 
         document.finishPage(page);
         File parent = outputFile.getParentFile();
@@ -85,6 +75,44 @@ public final class QuotePdfGenerator {
             document.close();
         }
         return outputFile;
+    }
+
+    /** Creates a sharp phone-shareable JPEG with the exact same layout as the printed quote. */
+    public static File createJpeg(File outputFile, Data data) throws Exception {
+        final int scale = 2;
+        Bitmap bitmap = Bitmap.createBitmap(
+                PAGE_WIDTH * scale,
+                PAGE_HEIGHT * scale,
+                Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(bitmap);
+        canvas.scale(scale, scale);
+        drawPage(canvas, data);
+        File parent = outputFile.getParentFile();
+        if (parent != null && !parent.exists() && !parent.mkdirs()) {
+            bitmap.recycle();
+            throw new IllegalStateException("The quote picture folder could not be created.");
+        }
+        try (FileOutputStream output = new FileOutputStream(outputFile)) {
+            if (!bitmap.compress(Bitmap.CompressFormat.JPEG, 94, output)) {
+                throw new IllegalStateException("The quote picture could not be saved.");
+            }
+        } finally {
+            bitmap.recycle();
+        }
+        return outputFile;
+    }
+
+    private static void drawPage(Canvas canvas, Data data) {
+        canvas.drawColor(Color.WHITE);
+        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        int y = drawHeader(canvas, paint);
+        y = drawLocations(canvas, paint, y);
+        y = drawCustomer(canvas, paint, y + 6, data);
+        y = drawPricedOptions(canvas, paint, y + 7, data);
+        y = drawProjectOptions(canvas, paint, y + 7, data);
+        y = drawDrawingSummary(canvas, paint, y + 7, data);
+        y = drawSectionsAndSlabs(canvas, paint, y + 7, data);
+        drawFooter(canvas, paint, Math.min(y + 10, PAGE_HEIGHT - 21));
     }
 
     private static int drawHeader(Canvas canvas, Paint paint) {
