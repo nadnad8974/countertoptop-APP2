@@ -2,4 +2,6 @@
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
     <cache-path name="drawing_photos" path="drawing_photos/" />
     <cache-path name="countertop_photos" path="countertop_photos/" />
+    <files-path name="saved_drawing_photos" path="drawing_photos/" />
+    <files-path name="saved_countertop_photos" path="countertop_photos/" />
 </paths>

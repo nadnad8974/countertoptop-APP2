@@ -5,4 +5,12 @@ local.properties
 build/
 */build/
 *.iml
-.env.local
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore
+keystore.properties
+key.properties
+*.apk
+*.aab
