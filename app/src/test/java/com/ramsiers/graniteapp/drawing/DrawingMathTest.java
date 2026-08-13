@@ -13,8 +13,11 @@ public class DrawingMathTest {
         JSONArray parts = new JSONArray();
         for (int i = 0; i < 3; i++) {
             JSONObject part = new JSONObject();
-            part.put("length", 24);
-            part.put("width", 12);
+            part.put("label", "countertop rectangle " + (i + 1));
+            part.put("feature_type", "countertop");
+            part.put("operation", "add");
+            part.put("length_inches", 24);
+            part.put("width_inches", 12);
             part.put("quantity", 1);
             parts.put(part);
         }
