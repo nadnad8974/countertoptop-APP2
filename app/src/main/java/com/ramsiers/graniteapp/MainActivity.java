@@ -14,6 +14,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
@@ -58,6 +59,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.core.content.FileProvider;
+import androidx.exifinterface.media.ExifInterface;
 
 import com.google.zxing.BarcodeFormat;
 import com.google.zxing.integration.android.IntentIntegrator;
@@ -1197,8 +1199,14 @@ public class MainActivity extends Activity {
                         String unitMessage = "unknown".equals(units)
                                 ? "Check the units shown on the original drawing."
                                 : "Units: " + units + ".";
+                        boolean measuredFallback = aiVerificationDrawing.optBoolean(
+                                "fallback_generated",
+                                false);
                         drawingVerificationStatus.setText(
                                 unitMessage
+                                        + (measuredFallback
+                                        ? " The AI returned measurements without an outline, so the app created this editable measured guide."
+                                        : "")
                                         + " Compare this redraw with the original above before accepting the square footage.");
                     } else {
                         verificationDrawingView.clearDrawing();
@@ -2648,6 +2656,7 @@ public class MainActivity extends Activity {
             decoded = BitmapFactory.decodeStream(input, null, options);
         }
         if (decoded == null) throw new IllegalStateException("The drawing photo could not be read.");
+        decoded = applyDrawingOrientation(uri, decoded);
         int largestDecodedSide = Math.max(decoded.getWidth(), decoded.getHeight());
         if (largestDecodedSide <= maximumSide) return decoded;
         double scale = (double) maximumSide / largestDecodedSide;
@@ -2658,6 +2667,62 @@ public class MainActivity extends Activity {
                 true);
         if (scaled != decoded) decoded.recycle();
         return scaled;
+    }
+
+    private Bitmap applyDrawingOrientation(Uri uri, Bitmap bitmap) {
+        int orientation = ExifInterface.ORIENTATION_NORMAL;
+        try (InputStream input = getContentResolver().openInputStream(uri)) {
+            if (input != null) {
+                orientation = new ExifInterface(input).getAttributeInt(
+                        ExifInterface.TAG_ORIENTATION,
+                        ExifInterface.ORIENTATION_NORMAL);
+            }
+        } catch (Exception ignored) {
+        }
+
+        Matrix matrix = new Matrix();
+        switch (orientation) {
+            case ExifInterface.ORIENTATION_FLIP_HORIZONTAL:
+                matrix.setScale(-1, 1);
+                break;
+            case ExifInterface.ORIENTATION_ROTATE_180:
+                matrix.setRotate(180);
+                break;
+            case ExifInterface.ORIENTATION_FLIP_VERTICAL:
+                matrix.setScale(1, -1);
+                break;
+            case ExifInterface.ORIENTATION_TRANSPOSE:
+                matrix.setRotate(90);
+                matrix.postScale(-1, 1);
+                break;
+            case ExifInterface.ORIENTATION_ROTATE_90:
+                matrix.setRotate(90);
+                break;
+            case ExifInterface.ORIENTATION_TRANSVERSE:
+                matrix.setRotate(-90);
+                matrix.postScale(-1, 1);
+                break;
+            case ExifInterface.ORIENTATION_ROTATE_270:
+                matrix.setRotate(-90);
+                break;
+            default:
+                return bitmap;
+        }
+
+        try {
+            Bitmap corrected = Bitmap.createBitmap(
+                    bitmap,
+                    0,
+                    0,
+                    bitmap.getWidth(),
+                    bitmap.getHeight(),
+                    matrix,
+                    true);
+            if (corrected != bitmap) bitmap.recycle();
+            return corrected;
+        } catch (Exception ignored) {
+            return bitmap;
+        }
     }
 
     private boolean isReadableDrawingUri(Uri uri) {
@@ -3106,6 +3171,7 @@ public class MainActivity extends Activity {
             original = BitmapFactory.decodeStream(input, null, decodeOptions);
         }
         if (original == null) throw new IllegalStateException("The drawing photo could not be read.");
+        original = applyDrawingOrientation(drawingUri, original);
 
         int width = original.getWidth();
         int height = original.getHeight();

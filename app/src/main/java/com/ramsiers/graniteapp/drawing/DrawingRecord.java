@@ -44,7 +44,13 @@ public final class DrawingRecord {
         this.missingInformation = safeText(missingInformation);
         this.lastError = safeText(lastError);
         this.calculationParts = copyArray(calculationParts);
-        this.verificationDrawing = copyObject(verificationDrawing);
+        JSONObject savedDrawing = copyObject(verificationDrawing);
+        if (analyzed
+                && savedDrawing == null
+                && DrawingMath.squareFeet(this.calculationParts) > 0) {
+            savedDrawing = DrawingFallback.fromCalculationParts(this.calculationParts);
+        }
+        this.verificationDrawing = savedDrawing;
     }
 
     public static DrawingRecord empty(String uri) {
@@ -77,6 +83,9 @@ public final class DrawingRecord {
                 "can_calculate",
                 serverSquareFeet > 0);
         double verifiedSquareFeet = DrawingMath.squareFeet(parts);
+        if (!DrawingFallback.hasDrawableShape(drawing) && verifiedSquareFeet > 0) {
+            drawing = DrawingFallback.fromCalculationParts(parts);
+        }
         boolean canCalculate = serverCanCalculate && verifiedSquareFeet > 0;
         String explanation = safeResponse.optString("explanation", "");
         String missingInformation = safeResponse.optString("missing_information", "");

@@ -70,6 +70,29 @@ public class DrawingRecordTest {
         assertEquals(20, result.squareFeet, 0.001);
     }
 
+    @Test
+    public void missingServerOutlineGetsEditableMeasuredFallback() throws Exception {
+        JSONObject response = new JSONObject()
+                .put("square_feet", 25)
+                .put("can_calculate", true)
+                .put("calculation_parts", new JSONArray()
+                        .put(part("countertop", "add", 120, 30))
+                        .put(part("sink", "subtract", 30, 18)));
+
+        DrawingRecord result = DrawingRecord.fromServerResponse(
+                "content://drawing/one",
+                4,
+                response);
+
+        assertTrue(result.canCalculate);
+        assertTrue(result.verificationDrawing.getBoolean("fallback_generated"));
+        assertTrue(result.verificationDrawing.getJSONArray("shapes").length() >= 2);
+        assertTrue(result.verificationDrawing.getJSONArray("dimensions").length() >= 4);
+        assertEquals(
+                "measured_part_1",
+                result.calculationParts.getJSONObject(0).getString("id"));
+    }
+
     private static JSONObject part(
             String feature,
             String operation,
