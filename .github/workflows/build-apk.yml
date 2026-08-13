@@ -31,6 +31,18 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: payment-service/package-lock.json
+
+      - name: Test secure payment service
+        run: |
+          npm ci --prefix payment-service
+          npm test --prefix payment-service
+
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
