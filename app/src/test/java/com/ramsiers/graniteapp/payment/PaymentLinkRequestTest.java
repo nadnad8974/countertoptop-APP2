@@ -8,7 +8,7 @@ import org.junit.Test;
 
 public class PaymentLinkRequestTest {
     @Test
-    public void sendsOnlyAmountAndOpaqueReference() {
+    public void sendsOnlyAmountAndOpaqueReference() throws Exception {
         JSONObject body = PaymentLinkRequest.create(
                 576400,
                 "rq_0123456789abcdef0123456789abcdef");
