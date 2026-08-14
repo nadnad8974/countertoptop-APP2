@@ -32,6 +32,7 @@ export function checkoutSessionParameters(payment, publicBaseUrl, nowSeconds) {
   const baseUrl = normalizedBaseUrl(publicBaseUrl);
   return {
     mode: "payment",
+    payment_method_types: ["us_bank_account"],
     client_reference_id: payment.quoteReference,
     line_items: [
       {

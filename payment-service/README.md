@@ -14,7 +14,7 @@ The service rejects all additional fields, including customer names, phone numbe
 1. Deploy this `payment-service` directory as its own Vercel project.
 2. Add a least-privilege Stripe restricted key as the sensitive production environment variable `STRIPE_RESTRICTED_KEY`.
 3. Set `PUBLIC_BASE_URL` to the production HTTPS origin.
-4. Enable **US bank account (ACH Direct Debit)** in Stripe's payment-method settings. Checkout uses dynamic payment methods and does not hardcode a client-side payment method list.
+4. Enable **US bank account (ACH Direct Debit)** in Stripe's payment-method settings. Checkout explicitly allows only `us_bank_account`.
 
 Never commit a real Stripe key or place one in the Android app.
 

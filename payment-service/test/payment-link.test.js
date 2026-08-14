@@ -33,7 +33,7 @@ test("rejects customer information", () => {
   );
 });
 
-test("builds a one-time Checkout Session without hardcoded payment methods", () => {
+test("builds a one-time ACH-only Checkout Session", () => {
   const parameters = checkoutSessionParameters(PAYMENT, "https://payments.example.com/", 1_800_000_000);
   assert.equal(parameters.mode, "payment");
   assert.equal(parameters.client_reference_id, PAYMENT.quoteReference);
@@ -53,7 +53,7 @@ test("builds a one-time Checkout Session without hardcoded payment methods", () 
   assert.equal(parameters.cancel_url, "https://payments.example.com/payment-canceled");
   assert.equal(parameters.expires_at, 1_800_082_800);
   assert.equal(parameters.integration_identifier, "ramsiers_android_qmvtzjke");
-  assert.equal("payment_method_types" in parameters, false);
+  assert.deepEqual(parameters.payment_method_types, ["us_bank_account"]);
   assert.equal(JSON.stringify(parameters).includes("customerName"), false);
   assert.equal(JSON.stringify(parameters).includes("phone"), false);
   assert.equal(JSON.stringify(parameters).includes("address"), false);
