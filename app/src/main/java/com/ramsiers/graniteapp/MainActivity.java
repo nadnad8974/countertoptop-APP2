@@ -66,6 +66,7 @@ import com.google.zxing.BarcodeFormat;
 import com.google.zxing.integration.android.IntentIntegrator;
 import com.google.zxing.integration.android.IntentResult;
 import com.ramsiers.graniteapp.drawing.DrawingApiRequest;
+import com.ramsiers.graniteapp.drawing.DrawingImageEnhancer;
 import com.ramsiers.graniteapp.drawing.DrawingMath;
 import com.ramsiers.graniteapp.drawing.DrawingRecord;
 import com.ramsiers.graniteapp.drawing.DrawingRules;
@@ -3523,8 +3524,31 @@ public class MainActivity extends Activity {
                     true);
         }
 
+        int uploadWidth = upload.getWidth();
+        int uploadHeight = upload.getHeight();
+        int[] enhancedPixels = new int[uploadWidth * uploadHeight];
+        upload.getPixels(
+                enhancedPixels,
+                0,
+                uploadWidth,
+                0,
+                0,
+                uploadWidth,
+                uploadHeight);
+        DrawingImageEnhancer.enhanceInPlace(enhancedPixels, uploadWidth, uploadHeight);
+        Bitmap enhanced = Bitmap.createBitmap(uploadWidth, uploadHeight, Bitmap.Config.ARGB_8888);
+        enhanced.setPixels(
+                enhancedPixels,
+                0,
+                uploadWidth,
+                0,
+                0,
+                uploadWidth,
+                uploadHeight);
+
         ByteArrayOutputStream output = new ByteArrayOutputStream();
-        upload.compress(Bitmap.CompressFormat.JPEG, 86, output);
+        enhanced.compress(Bitmap.CompressFormat.JPEG, 92, output);
+        enhanced.recycle();
         if (upload != original) upload.recycle();
         original.recycle();
         return "data:image/jpeg;base64,"
