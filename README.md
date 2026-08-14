@@ -2,7 +2,7 @@
 
 Android test MVP for customer slab selection and countertop quote requests.
 
-## Included in test version 1.53
+## Included in test version 1.54
 
 - Scan MSI or other slab QR codes
 - Save and remove slab selections
