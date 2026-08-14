@@ -55,6 +55,7 @@ import android.widget.ProgressBar;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
 import android.widget.ScrollView;
+import android.widget.SeekBar;
 import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -66,6 +67,7 @@ import com.google.zxing.BarcodeFormat;
 import com.google.zxing.integration.android.IntentIntegrator;
 import com.google.zxing.integration.android.IntentResult;
 import com.ramsiers.graniteapp.drawing.DrawingApiRequest;
+import com.ramsiers.graniteapp.drawing.DrawingCropMath;
 import com.ramsiers.graniteapp.drawing.DrawingImageEnhancer;
 import com.ramsiers.graniteapp.drawing.DrawingMath;
 import com.ramsiers.graniteapp.drawing.DrawingRecord;
@@ -2811,6 +2813,164 @@ public class MainActivity extends Activity {
         startActivityForResult(intent, PICK_DRAWING_IMAGE);
     }
 
+    private void offerDrawingCrop(List<Uri> drawingUris) {
+        ArrayList<Uri> remaining = new ArrayList<>();
+        for (Uri uri : drawingUris) {
+            if (uri != null && !remaining.contains(uri)) remaining.add(uri);
+        }
+        cropNextDrawing(remaining, new ArrayList<>());
+    }
+
+    private void cropNextDrawing(ArrayList<Uri> remaining, ArrayList<Uri> prepared) {
+        if (remaining.isEmpty()) {
+            if (!prepared.isEmpty()) addDrawingPhotos(prepared);
+            return;
+        }
+        Uri sourceUri = remaining.remove(0);
+        showDrawingCropDialog(sourceUri, resultUri -> {
+            if (resultUri != null) prepared.add(resultUri);
+            cropNextDrawing(remaining, prepared);
+        });
+    }
+
+    private void showDrawingCropDialog(Uri sourceUri, DrawingCropCallback callback) {
+        final Bitmap source;
+        try {
+            source = decodeDrawingBitmap(sourceUri, 2400);
+        } catch (Exception exception) {
+            Toast.makeText(
+                    this,
+                    "This drawing could not be opened for cropping.",
+                    Toast.LENGTH_LONG).show();
+            callback.finished(null);
+            return;
+        }
+
+        DrawingCropPreviewView preview = new DrawingCropPreviewView(this, source);
+        preview.setContentDescription(
+                "Drawing crop preview. Darkened edges will be removed before AI analysis.");
+        LinearLayout controls = new LinearLayout(this);
+        controls.setOrientation(LinearLayout.VERTICAL);
+        controls.setPadding(dp(16), dp(8), dp(16), dp(6));
+        controls.addView(label(
+                "Move the four sliders until the darkened area contains only the desk or background. "
+                        + "Leave a small margin around every number, fraction, line, and arrow."));
+        controls.addView(preview, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(340)));
+
+        SeekBar left = cropSeekBar("Trim left", controls, preview, 0);
+        SeekBar top = cropSeekBar("Trim top", controls, preview, 1);
+        SeekBar right = cropSeekBar("Trim right", controls, preview, 2);
+        SeekBar bottom = cropSeekBar("Trim bottom", controls, preview, 3);
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(controls);
+        final boolean[] completed = {false};
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Crop drawing before AI")
+                .setView(scroll)
+                .setNegativeButton("Cancel upload", (ignored, which) -> {
+                    completed[0] = true;
+                    callback.finished(null);
+                })
+                .setNeutralButton("Use full photo", (ignored, which) -> {
+                    completed[0] = true;
+                    callback.finished(sourceUri);
+                })
+                .setPositiveButton("Use crop", null)
+                .create();
+        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener(button -> {
+                    Uri cropped = saveCroppedDrawing(
+                            source,
+                            left.getProgress(),
+                            top.getProgress(),
+                            right.getProgress(),
+                            bottom.getProgress());
+                    if (cropped == null) {
+                        Toast.makeText(
+                                this,
+                                "The cropped drawing could not be saved.",
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    completed[0] = true;
+                    dialog.dismiss();
+                    callback.finished(cropped);
+                }));
+        dialog.setOnCancelListener(ignored -> {
+            if (!completed[0]) {
+                completed[0] = true;
+                callback.finished(null);
+            }
+        });
+        dialog.show();
+    }
+
+    private SeekBar cropSeekBar(
+            String title,
+            LinearLayout controls,
+            DrawingCropPreviewView preview,
+            int edge) {
+        TextView heading = label(title + ": 0%");
+        heading.setTypeface(Typeface.DEFAULT_BOLD);
+        controls.addView(heading);
+        SeekBar seekBar = new SeekBar(this);
+        seekBar.setMax(DrawingCropMath.MAXIMUM_TRIM_PERCENT);
+        seekBar.setProgress(0);
+        seekBar.setContentDescription(title);
+        seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar bar, int value, boolean fromUser) {
+                heading.setText(title + ": " + value + "%");
+                preview.setTrim(edge, value);
+            }
+
+            @Override public void onStartTrackingTouch(SeekBar bar) {}
+            @Override public void onStopTrackingTouch(SeekBar bar) {}
+        });
+        controls.addView(seekBar, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(48)));
+        return seekBar;
+    }
+
+    private Uri saveCroppedDrawing(
+            Bitmap source,
+            int leftPercent,
+            int topPercent,
+            int rightPercent,
+            int bottomPercent) {
+        Bitmap cropped = null;
+        try {
+            int[] crop = DrawingCropMath.bounds(
+                    source.getWidth(),
+                    source.getHeight(),
+                    leftPercent,
+                    topPercent,
+                    rightPercent,
+                    bottomPercent);
+            cropped = Bitmap.createBitmap(source, crop[0], crop[1], crop[2], crop[3]);
+            File drawingDirectory = new File(getFilesDir(), "drawing_photos");
+            if (!drawingDirectory.exists() && !drawingDirectory.mkdirs()) return null;
+            File drawingFile = new File(
+                    drawingDirectory,
+                    "cropped-drawing-" + System.currentTimeMillis() + ".jpg");
+            try (java.io.FileOutputStream output = new java.io.FileOutputStream(drawingFile)) {
+                if (!cropped.compress(Bitmap.CompressFormat.JPEG, 95, output)) return null;
+            }
+            return FileProvider.getUriForFile(
+                    this,
+                    getPackageName() + ".fileprovider",
+                    drawingFile);
+        } catch (Exception ignored) {
+            return null;
+        } finally {
+            if (cropped != null && cropped != source) cropped.recycle();
+        }
+    }
+
     private void selectDrawing(int index) {
         if (drawingPhotoUris.isEmpty()) return;
         syncActiveDrawingRecord();
@@ -5028,7 +5188,7 @@ public class MainActivity extends Activity {
                 } catch (Exception ignored) {
                 }
             }
-            if (!selectedDrawingUris.isEmpty()) addDrawingPhotos(selectedDrawingUris);
+            if (!selectedDrawingUris.isEmpty()) offerDrawingCrop(selectedDrawingUris);
         }
         if (requestCode == TAKE_DRAWING_PHOTO) {
             pendingCameraCapture = 0;
@@ -5039,7 +5199,7 @@ public class MainActivity extends Activity {
                     && isReadableDrawingUri(completedDrawingCapture)) {
                 ArrayList<Uri> capturedDrawing = new ArrayList<>();
                 capturedDrawing.add(completedDrawingCapture);
-                addDrawingPhotos(capturedDrawing);
+                offerDrawingCrop(capturedDrawing);
                 completedDrawingCapture = null;
             } else if (resultCode == RESULT_OK && data != null && data.getExtras() != null
                     && data.getExtras().get("data") instanceof Bitmap) {
@@ -5050,7 +5210,7 @@ public class MainActivity extends Activity {
                 if (savedDrawingUri != null) {
                     ArrayList<Uri> capturedDrawing = new ArrayList<>();
                     capturedDrawing.add(savedDrawingUri);
-                    addDrawingPhotos(capturedDrawing);
+                    offerDrawingCrop(capturedDrawing);
                 } else {
                     drawingStatus.setText(drawingPhotoUris.isEmpty()
                             ? "The drawing photo could not be saved."
@@ -6063,6 +6223,61 @@ public class MainActivity extends Activity {
 
     private int dp(int value) {
         return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+
+    private interface DrawingCropCallback {
+        void finished(Uri resultUri);
+    }
+
+    private static class DrawingCropPreviewView extends View {
+        private final Bitmap source;
+        private final Paint imagePaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+        private final Paint shadePaint = new Paint();
+        private final Paint borderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final int[] trimPercent = new int[4];
+
+        DrawingCropPreviewView(Context context, Bitmap source) {
+            super(context);
+            this.source = source;
+            shadePaint.setColor(0x99000000);
+            borderPaint.setColor(Color.WHITE);
+            borderPaint.setStyle(Paint.Style.STROKE);
+            borderPaint.setStrokeWidth(5f);
+            setBackgroundColor(Color.BLACK);
+        }
+
+        void setTrim(int edge, int percent) {
+            if (edge < 0 || edge >= trimPercent.length) return;
+            trimPercent[edge] = Math.max(
+                    0,
+                    Math.min(DrawingCropMath.MAXIMUM_TRIM_PERCENT, percent));
+            invalidate();
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            if (source.getWidth() <= 0 || source.getHeight() <= 0) return;
+            float scale = Math.min(
+                    (float) getWidth() / source.getWidth(),
+                    (float) getHeight() / source.getHeight());
+            float drawnWidth = source.getWidth() * scale;
+            float drawnHeight = source.getHeight() * scale;
+            float left = (getWidth() - drawnWidth) / 2f;
+            float top = (getHeight() - drawnHeight) / 2f;
+            RectF image = new RectF(left, top, left + drawnWidth, top + drawnHeight);
+            canvas.drawBitmap(source, null, image, imagePaint);
+
+            float cropLeft = image.left + image.width() * trimPercent[0] / 100f;
+            float cropTop = image.top + image.height() * trimPercent[1] / 100f;
+            float cropRight = image.right - image.width() * trimPercent[2] / 100f;
+            float cropBottom = image.bottom - image.height() * trimPercent[3] / 100f;
+            canvas.drawRect(image.left, image.top, image.right, cropTop, shadePaint);
+            canvas.drawRect(image.left, cropBottom, image.right, image.bottom, shadePaint);
+            canvas.drawRect(image.left, cropTop, cropLeft, cropBottom, shadePaint);
+            canvas.drawRect(cropRight, cropTop, image.right, cropBottom, shadePaint);
+            canvas.drawRect(cropLeft, cropTop, cropRight, cropBottom, borderPaint);
+        }
     }
 
     private static class ZoomPanFrame extends FrameLayout {

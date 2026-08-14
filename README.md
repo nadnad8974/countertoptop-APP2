@@ -8,6 +8,7 @@ Android test MVP for customer slab selection and countertop quote requests.
 - Save and remove slab selections
 - Open saved MSI links
 - Upload up to six countertop drawings; start AI automatically, analyze each separately, and add only complete, verified estimates
+- Crop each camera or Gallery drawing before AI analysis, then send a high-contrast black-and-white copy while preserving the original image
 - Compare every original drawing with its own saved AI verification redraw
 - Zoom, edit redraw dimensions, correct shape/opening types, and add your own short labels
 - Keep AI-written labels off the redraw; only labels you add yourself are shown
