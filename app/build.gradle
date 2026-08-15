@@ -11,8 +11,8 @@ android {
         applicationId 'com.ramsiers.graniteapp'
         minSdk 23
         targetSdk 35
-        versionCode 54
-        versionName '1.54-test'
+        versionCode 60
+        versionName '1.60-test'
     }
 
     compileOptions {
@@ -44,6 +44,7 @@ configurations.configureEach {
 
 dependencies {
     implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'androidx.documentfile:documentfile:1.1.0'
     implementation 'androidx.exifinterface:exifinterface:1.3.7'
     implementation 'com.journeyapps:zxing-android-embedded:4.3.0'
 

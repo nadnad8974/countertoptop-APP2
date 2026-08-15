@@ -4,6 +4,7 @@ import android.graphics.Canvas;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.Paint;
+import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.graphics.pdf.PdfDocument;
 
@@ -55,6 +56,9 @@ public final class QuotePdfGenerator {
         public String countertopSections = "No countertop sections added yet.";
         public String selectedSlabs = "No slabs selected.";
         public String projectNotes = "Not provided";
+        public Bitmap signature;
+        public String signatureCustomer = "Not provided";
+        public String signatureDate = "Not provided";
     }
 
     public static File create(File outputFile, Data data) throws Exception {
@@ -64,6 +68,16 @@ public final class QuotePdfGenerator {
         drawPage(page.getCanvas(), data);
 
         document.finishPage(page);
+        PdfDocument.Page itemizedPage = document.startPage(
+                new PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, 2).create());
+        drawItemizedPage(itemizedPage.getCanvas(), data);
+        document.finishPage(itemizedPage);
+        if (data.signature != null) {
+            PdfDocument.Page signaturePage = document.startPage(
+                    new PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, 3).create());
+            drawSignaturePage(signaturePage.getCanvas(), data);
+            document.finishPage(signaturePage);
+        }
         File parent = outputFile.getParentFile();
         if (parent != null && !parent.exists() && !parent.mkdirs()) {
             document.close();
@@ -73,11 +87,12 @@ public final class QuotePdfGenerator {
             document.writeTo(output);
         } finally {
             document.close();
+            recycleSignature(data);
         }
         return outputFile;
     }
 
-    /** Creates a sharp phone-shareable JPEG with the exact same layout as the printed quote. */
+    /** Creates a sharp phone-shareable JPEG containing every purchased line item. */
     public static File createJpeg(File outputFile, Data data) throws Exception {
         final int scale = 2;
         Bitmap bitmap = Bitmap.createBitmap(
@@ -86,7 +101,7 @@ public final class QuotePdfGenerator {
                 Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(bitmap);
         canvas.scale(scale, scale);
-        drawPage(canvas, data);
+        drawItemizedPage(canvas, data);
         File parent = outputFile.getParentFile();
         if (parent != null && !parent.exists() && !parent.mkdirs()) {
             bitmap.recycle();
@@ -98,6 +113,7 @@ public final class QuotePdfGenerator {
             }
         } finally {
             bitmap.recycle();
+            recycleSignature(data);
         }
         return outputFile;
     }
@@ -113,6 +129,65 @@ public final class QuotePdfGenerator {
         y = drawDrawingSummary(canvas, paint, y + 7, data);
         y = drawSectionsAndSlabs(canvas, paint, y + 7, data);
         drawFooter(canvas, paint, Math.min(y + 10, PAGE_HEIGHT - 21));
+    }
+
+    private static void drawItemizedPage(Canvas canvas, Data data) {
+        canvas.drawColor(Color.WHITE);
+        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        int y = drawHeader(canvas, paint);
+        y = drawCustomer(canvas, paint, y + 10, data);
+        y = sectionTitle(canvas, paint, y + 12, "COMPLETE ITEMIZED PURCHASES");
+        int headerH = 20;
+        fillRect(canvas, paint, MARGIN, y, MARGIN + CONTENT_WIDTH, y + headerH, TAN);
+        drawCell(canvas, paint, "Item", MARGIN + 8, y + 13, 7.5f, true);
+        drawCell(canvas, paint, "Quantity / Details", MARGIN + 170, y + 13, 7.5f, true);
+        drawCell(canvas, paint, "Amount", MARGIN + 442, y + 13, 7.5f, true);
+        y += headerH;
+        List<PriceRow> rows = data.pricedOptions.isEmpty()
+                ? java.util.Collections.singletonList(new PriceRow("No priced options selected", "", "$0.00"))
+                : data.pricedOptions;
+        for (PriceRow row : rows) {
+            int rowH = 27;
+            fillRect(canvas, paint, MARGIN, y, MARGIN + CONTENT_WIDTH, y + rowH, Color.WHITE);
+            strokeRect(canvas, paint, MARGIN, y, MARGIN + CONTENT_WIDTH, y + rowH, GRID);
+            line(canvas, paint, MARGIN + 164, y, MARGIN + 164, y + rowH, GRID);
+            line(canvas, paint, MARGIN + 436, y, MARGIN + 436, y + rowH, GRID);
+            drawWrapped(canvas, paint, row.item, MARGIN + 7, y + 11, 7.1f, 150, 2, false, Color.DKGRAY);
+            drawWrapped(canvas, paint, row.details, MARGIN + 171, y + 11, 7.1f, 255, 2, false, Color.DKGRAY);
+            drawRight(canvas, paint, row.amount, MARGIN + CONTENT_WIDTH - 7, y + 16, 7.3f, true);
+            y += rowH;
+        }
+        fillRect(canvas, paint, MARGIN, y, MARGIN + CONTENT_WIDTH, y + 25, LIGHT);
+        strokeRect(canvas, paint, MARGIN, y, MARGIN + CONTENT_WIDTH, y + 25, GRID);
+        drawRight(canvas, paint, "FULL QUOTE TOTAL  " + data.estimatedTotal,
+                MARGIN + CONTENT_WIDTH - 8, y + 17, 9f, true);
+        y += 25;
+        y = summaryRow(canvas, paint, y + 12, 38, 114, "PLUMBING NOTICE",
+                "Ramsier's does not disconnect, reconnect, or perform plumbing work.");
+        drawFooter(canvas, paint, Math.min(y + 14, PAGE_HEIGHT - 21));
+    }
+
+    private static void recycleSignature(Data data) {
+        if (data.signature != null && !data.signature.isRecycled()) data.signature.recycle();
+        data.signature = null;
+    }
+
+    private static void drawSignaturePage(Canvas canvas, Data data) {
+        canvas.drawColor(Color.WHITE);
+        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        int y = drawHeader(canvas, paint);
+        y = sectionTitle(canvas, paint, y + 18, "FINAL QUOTE ACCEPTANCE");
+        y = summaryRow(canvas, paint, y, 28, 114, "Customer", data.signatureCustomer);
+        y = summaryRow(canvas, paint, y, 28, 114, "Final total", data.estimatedTotal);
+        y = summaryRow(canvas, paint, y, 38, 114, "Plumbing notice",
+                "Ramsier's does not disconnect, reconnect, or perform plumbing work.");
+        y = summaryRow(canvas, paint, y, 28, 114, "Signature date", data.signatureDate);
+        y = sectionTitle(canvas, paint, y + 18, "CUSTOMER SIGNATURE");
+        fillRect(canvas, paint, MARGIN, y, MARGIN + CONTENT_WIDTH, y + 230, Color.WHITE);
+        strokeRect(canvas, paint, MARGIN, y, MARGIN + CONTENT_WIDTH, y + 230, GRID);
+        RectF destination = new RectF(MARGIN + 18, y + 18, MARGIN + CONTENT_WIDTH - 18, y + 212);
+        canvas.drawBitmap(data.signature, null, destination, paint);
+        drawFooter(canvas, paint, PAGE_HEIGHT - 30);
     }
 
     private static int drawHeader(Canvas canvas, Paint paint) {
@@ -274,7 +349,7 @@ public final class QuotePdfGenerator {
     private static void drawFooter(Canvas canvas, Paint paint, int y) {
         line(canvas, paint, MARGIN, y, MARGIN + CONTENT_WIDTH, y, GRID);
         drawCell(canvas, paint, "Ramsier's - Quote Request Summary", MARGIN, y + 12, 6.5f, false, GRAY);
-        drawRight(canvas, paint, "Page 1 of 1", MARGIN + CONTENT_WIDTH, y + 12, 6.5f, false);
+        drawRight(canvas, paint, "Ramsier's Granite & Quartz", MARGIN + CONTENT_WIDTH, y + 12, 6.5f, false);
     }
 
     private static void fillRect(Canvas canvas, Paint paint, float left, float top, float right, float bottom, int color) {

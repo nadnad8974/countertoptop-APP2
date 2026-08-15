@@ -2,7 +2,9 @@ package com.ramsiers.graniteapp;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.DatePickerDialog;
 import android.app.Dialog;
+import android.app.TimePickerDialog;
 import android.Manifest;
 import android.content.ClipData;
 import android.content.Context;
@@ -29,6 +31,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.provider.MediaStore;
+import android.provider.CalendarContract;
 import android.print.PrintManager;
 import android.text.Editable;
 import android.text.InputType;
@@ -71,6 +74,7 @@ import com.ramsiers.graniteapp.drawing.DrawingCropMath;
 import com.ramsiers.graniteapp.drawing.DrawingImageEnhancer;
 import com.ramsiers.graniteapp.drawing.DrawingMath;
 import com.ramsiers.graniteapp.drawing.DrawingRecord;
+import com.ramsiers.graniteapp.drawing.DrawingRetryPolicy;
 import com.ramsiers.graniteapp.drawing.DrawingRules;
 import com.ramsiers.graniteapp.drawing.DrawingState;
 import com.ramsiers.graniteapp.drawing.QuoteSquareFootMath;
@@ -82,18 +86,26 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.text.DecimalFormat;
+import java.text.SimpleDateFormat;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.SecureRandom;
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
+import java.util.Date;
+
+import javax.crypto.SecretKeyFactory;
+import javax.crypto.spec.PBEKeySpec;
 
 public class MainActivity extends Activity {
     private static final int PICK_IMAGE = 901;
@@ -101,6 +113,8 @@ public class MainActivity extends Activity {
     private static final int PICK_DRAWING_IMAGE = 903;
     private static final int CAMERA_PERMISSION = 904;
     private static final int TAKE_COUNTERTOP_PHOTO = 905;
+    private static final int PICK_ADMIN_PRODUCT_IMAGE = 906;
+    private static final int PICK_CUSTOMER_JOBS_FOLDER = 907;
     private static final int CAMERA_CAPTURE_COUNTERTOP = 1;
     private static final int CAMERA_CAPTURE_DRAWING = 2;
     private static final int MAX_DRAWING_PHOTOS = 6;
@@ -113,6 +127,7 @@ public class MainActivity extends Activity {
     private static final String STATE_DRAWING_JSON = "drawing_state_json";
     private static final String PREFS = "ramsiers_granite_app";
     private static final String PREF_DRAWING_STATE = "drawing_state_v1";
+    private static final String PREF_CUSTOMER_JOBS_TREE_URI = "customer_jobs_tree_uri_v1";
     private static final String DRAWING_AI_ENDPOINT =
             "https://ramsiers-drawing-ai.nadnad8974.chatgpt.site/api/analyze";
     private static final String PAYMENT_LINK_ENDPOINT =
@@ -122,9 +137,15 @@ public class MainActivity extends Activity {
     private static final String PRICE_FAUCET = "price_faucet";
     private static final String PRICE_BASKET = "price_basket";
     private static final String PRICE_GRID = "price_grid";
+    private static final String ADMIN_PIN_SALT = "admin_pin_salt_v1";
+    private static final String ADMIN_PIN_HASH = "admin_pin_hash_v1";
+    private static final String ADMIN_PIN_LOCK_UNTIL = "admin_pin_lock_until_v1";
+    private static final String ADMIN_PIN_FAILURES = "admin_pin_failures_v1";
+    private static final int ADMIN_PIN_ITERATIONS = 120000;
+    private static final long ADMIN_SESSION_MILLIS = 5 * 60 * 1000L;
     private static final double WATERFALL_PRICE = 300.0;
-    private static final String DEFAULT_PAGE_ORDER = "0,1,2,3,12,8,13,15,16,17,20,14,18,19,11,6,4";
-    private static final String ALL_BUILT_IN_PAGES = "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,100,101,102,103,104,105,106";
+    private static final String DEFAULT_PAGE_ORDER = JobWorkflow.APPROVED_PAGE_ORDER;
+    private static final String ALL_BUILT_IN_PAGES = "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,42,44,100,101,102,103,104,105,106";
     private static final int CUSTOM_PAGE_START = 1000;
     private static final int PAGE_NAME = 0;
     private static final int PAGE_PHONE = 1;
@@ -147,6 +168,30 @@ public class MainActivity extends Activity {
     private static final int PAGE_CABINETS = 18;
     private static final int PAGE_BUY_CABINETS = 19;
     private static final int PAGE_WATERFALL = 20;
+    private static final int PAGE_JOB_SEARCH = 21;
+    private static final int PAGE_MANUAL_MEASUREMENT = 22;
+    private static final int PAGE_COUNTERTOP_PHOTOS = 23;
+    private static final int PAGE_COUNTERTOP_REMOVAL = 24;
+    private static final int PAGE_REVIEW_QUOTE = 25;
+    private static final int PAGE_PRINT_QUOTE = 26;
+    private static final int PAGE_TEMPLATE_UPDATE = 27;
+    private static final int PAGE_FINAL_QUOTE = 28;
+    private static final int PAGE_CUSTOMER_SIGNATURE = 29;
+    private static final int PAGE_SIGNED_QUOTE = 30;
+    private static final int PAGE_TEMPLATE_CALENDAR = 31;
+    private static final int PAGE_INSTALL_CALENDAR = 32;
+    private static final int PAGE_INSTALLATION_JOB = 33;
+    private static final int PAGE_JOB_FINISHED = 34;
+    private static final int PAGE_CREDIT_POLICY = 35;
+    private static final int PAGE_PAYMENT_METHOD = 36;
+    private static final int PAGE_STRIPE_ACH = 37;
+    private static final int PAGE_CHASE_CHECK = 38;
+    private static final int PAGE_CHASE_CREDIT = 39;
+    private static final int PAGE_PAYMENT_STATUS = 40;
+    private static final int PAGE_SCHEDULE = 41;
+    private static final int PAGE_PLUMBING_NOTICE = 42;
+    private static final int PAGE_CROP_DRAWING = 43;
+    private static final int PAGE_JOB_HISTORY = 44;
     private static final int PAGE_SECTION_NAME = 100;
     private static final int PAGE_SECTION_LENGTH = 101;
     private static final int PAGE_SECTION_WIDTH = 102;
@@ -173,7 +218,8 @@ public class MainActivity extends Activity {
     private LinearLayout sectionList;
     private LinearLayout manualMeasurementList;
 
-    private EditText customerName;
+    private EditText customerFirstName;
+    private EditText customerLastName;
     private EditText customerPhone;
     private EditText customerEmail;
     private EditText projectAddress;
@@ -211,14 +257,40 @@ public class MainActivity extends Activity {
     private EditText waterfallComments;
     private EditText cabinetsApproximateDate;
     private EditText cabinetInterestComments;
+    private EditText additionalSquareFeet;
+    private EditText finalPricePerSqFt;
+    private EditText removalSquareFeet;
+    private EditText templateDateTime;
+    private EditText installationDateTime;
+    private EditText checkNumber;
+    private EditText paymentNotes;
+    private EditText jobSearchInput;
 
     private boolean cooktopCutoutYes;
     private boolean basketsYes;
     private boolean gridsYes;
     private boolean wantsToBuyCabinets;
+    private boolean countertopRemoval;
+    private boolean plumbingNoticeAcknowledged;
+    private boolean creditCardPolicyAcknowledged;
+    private boolean jobFinished;
+    private boolean customerSigned;
+    private String paymentMethod = "ACH bank account";
+    private String paymentStatus = "Not requested";
     private boolean paymentLinkRequestInProgress;
     private String paymentQuoteReference = "";
     private long paymentQuoteAmountCents = -1;
+    private String preparedPaymentUrl = "";
+    private long preparedPaymentAmountCents = -1;
+    private Uri preparedPaymentImageUri;
+    private Uri preparedPaymentPdfUri;
+    private long templateAppointmentMillis;
+    private long installationAppointmentMillis;
+    private long adminSessionExpiresAt;
+    private String currentJobId = "job_" + UUID.randomUUID().toString().replace("-", "");
+    private String currentDriveFolderName = "";
+    private boolean driveOperationInProgress;
+    private String pendingProductImageKey;
     private String edgeDetail = "Eased and polished";
     private String sinkSelection = "Not selected";
     private double aiDrawingSquareFeet;
@@ -267,6 +339,7 @@ public class MainActivity extends Activity {
     private HttpURLConnection activeDrawingConnection;
     private Dialog drawingZoomDialog;
     private Dialog drawingEditDialog;
+    private SignaturePad signaturePad;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -440,13 +513,6 @@ public class MainActivity extends Activity {
         return count;
     }
 
-    private boolean hasDrawingAnalysisError() {
-        for (DrawingRecord drawing : drawingRecords) {
-            if (drawing != null && !drawing.lastError.isEmpty()) return true;
-        }
-        return false;
-    }
-
     private boolean hasCompleteAiDrawingEstimate() {
         if (drawingRecords.isEmpty()) return false;
         for (DrawingRecord drawing : drawingRecords) {
@@ -508,6 +574,8 @@ public class MainActivity extends Activity {
     @Override
     protected void onStop() {
         persistDrawingState();
+        saveJobSnapshot();
+        if (pendingProductImageKey == null) adminSessionExpiresAt = 0;
         super.onStop();
     }
 
@@ -537,7 +605,8 @@ public class MainActivity extends Activity {
         screen.addView(navigation, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        customerName = input("Type the customer's full name", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+        customerFirstName = input("Customer's first name", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+        customerLastName = input("Customer's last name", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
         customerPhone = input("Type the customer's phone number", InputType.TYPE_CLASS_PHONE);
         customerEmail = input("Type the customer's email", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
         projectAddress = addressInput("Type the project address");
@@ -596,6 +665,17 @@ public class MainActivity extends Activity {
         waterfallComments = input("Waterfall comments, if needed", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         cabinetsApproximateDate = input("Approximate cabinet date or notes", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         cabinetInterestComments = input("Cabinet comments, if needed", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        additionalSquareFeet = input("Additional square feet found during template", decimalInput());
+        additionalSquareFeet.setText("0");
+        finalPricePerSqFt = input("Final installed price per square foot", decimalInput());
+        removalSquareFeet = input("Square feet to remove at $10 per square foot", decimalInput());
+        removalSquareFeet.setText("0");
+        templateDateTime = input("Template date and time", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        installationDateTime = input("Installation date and time", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        checkNumber = input("Check number only — never routing or account number", InputType.TYPE_CLASS_NUMBER);
+        paymentNotes = input("Payment notes (no bank or card numbers)", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        jobSearchInput = input("Search first name, last name, phone, address, material, or notes", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+        signaturePad = new SignaturePad(this);
 
         squareFootResult = resultLabel("Net square footage: 0.00");
         totalResult = resultLabel("Estimated total: $0.00");
@@ -640,13 +720,15 @@ public class MainActivity extends Activity {
         navigation.removeAllViews();
 
         addBrandHeader();
-        TextView progress = label("Question " + (stepIndex + 1) + " of " + totalSteps());
+        TextView progress = label(stepIndex >= pageOrder.size()
+                ? "Workflow complete"
+                : "Question " + (stepIndex + 1) + " of " + totalSteps());
         progress.setGravity(Gravity.CENTER);
         progress.setTextColor(Color.GRAY);
         page.addView(progress);
 
         if (stepIndex >= pageOrder.size()) {
-            addReviewStep();
+            addWorkflowCompleteStep();
         } else {
             showQuestionPage(pageOrder.get(stepIndex));
         }
@@ -656,8 +738,11 @@ public class MainActivity extends Activity {
 
     private void showQuestionPage(int pageId) {
         switch (pageId) {
+            case PAGE_JOB_SEARCH:
+                addJobSearchStep();
+                break;
             case PAGE_NAME:
-                addQuestion(questionText(pageId, "What is the customer's name?"), customerName, true);
+                addCustomerNameStep();
                 break;
             case PAGE_PHONE:
                 addQuestion(questionText(pageId, "What is the customer's phone number?"), customerPhone, true);
@@ -719,6 +804,69 @@ public class MainActivity extends Activity {
                 break;
             case PAGE_PHOTO:
                 addPhotoStep();
+                break;
+            case PAGE_MANUAL_MEASUREMENT:
+                addManualMeasurementStep();
+                break;
+            case PAGE_COUNTERTOP_PHOTOS:
+                addCountertopPhotosStep();
+                break;
+            case PAGE_COUNTERTOP_REMOVAL:
+                addCountertopRemovalStep();
+                break;
+            case PAGE_REVIEW_QUOTE:
+                addQuoteReviewPage();
+                break;
+            case PAGE_PRINT_QUOTE:
+                addPrintQuotePage();
+                break;
+            case PAGE_TEMPLATE_UPDATE:
+                addTemplateUpdatePage();
+                break;
+            case PAGE_FINAL_QUOTE:
+                addFinalQuotePage();
+                break;
+            case PAGE_CUSTOMER_SIGNATURE:
+                addCustomerSignaturePage();
+                break;
+            case PAGE_SIGNED_QUOTE:
+                addSignedQuotePage();
+                break;
+            case PAGE_TEMPLATE_CALENDAR:
+                addCalendarPage(true);
+                break;
+            case PAGE_INSTALL_CALENDAR:
+                addCalendarPage(false);
+                break;
+            case PAGE_INSTALLATION_JOB:
+                addInstallationJobPage();
+                break;
+            case PAGE_JOB_FINISHED:
+                addJobFinishedPage();
+                break;
+            case PAGE_CREDIT_POLICY:
+                addCreditPolicyPage();
+                break;
+            case PAGE_PAYMENT_METHOD:
+                addPaymentMethodPage();
+                break;
+            case PAGE_STRIPE_ACH:
+                addStripeAchPage();
+                break;
+            case PAGE_CHASE_CHECK:
+                addChaseCheckPage();
+                break;
+            case PAGE_CHASE_CREDIT:
+                addChaseCreditPage();
+                break;
+            case PAGE_PAYMENT_STATUS:
+                addPaymentStatusPage();
+                break;
+            case PAGE_PLUMBING_NOTICE:
+                addPlumbingNoticePage();
+                break;
+            case PAGE_JOB_HISTORY:
+                addJobHistoryPage();
                 break;
             case PAGE_SECTION_NAME:
                 addQuestion(questionText(pageId, "What should this countertop section be called?"), sectionName, true);
@@ -993,7 +1141,17 @@ public class MainActivity extends Activity {
 
     private void addProductImage(int imageResource, String description) {
         ImageView image = new ImageView(this);
-        image.setImageResource(imageResource);
+        String savedImage = prefs.getString(productImagePreferenceKey(imageResource), "");
+        if (savedImage.isEmpty()) {
+            image.setImageResource(imageResource);
+        } else {
+            try {
+                image.setImageURI(Uri.parse(savedImage));
+                if (image.getDrawable() == null) image.setImageResource(imageResource);
+            } catch (Exception ignored) {
+                image.setImageResource(imageResource);
+            }
+        }
         image.setContentDescription(description);
         image.setAdjustViewBounds(true);
         image.setScaleType(ImageView.ScaleType.FIT_CENTER);
@@ -1106,8 +1264,9 @@ public class MainActivity extends Activity {
     private void addPhotoStep() {
         hideKeyboard();
         page.clearFocus();
+        photoAccordionOpen = 2;
         page.addView(questionTitle(questionForEdit(PAGE_PHOTO)));
-        addHelp("Upload one or more hand-drawn sketches, 20/20 software drawings, or other clear countertop drawings. AI checks each drawing separately and adds the verified estimates.");
+        addHelp("Upload one or more blueprints, hand-drawn sketches, 20/20 software drawings, or other countertop drawings. AI reads printed and handwritten labels and dimensions, checks each drawing separately, and never estimates a missing measurement.");
 
         Button drawingPlan = accordionButton("Countertop drawing for AI", photoAccordionOpen == 2);
         drawingPlan.setOnClickListener(v -> togglePhotoAccordion(2));
@@ -1233,10 +1392,22 @@ public class MainActivity extends Activity {
                     page.addView(drawingVerificationStatus);
                 }
 
-                if (!drawingAnalysisInProgress && hasDrawingAnalysisError()) {
-                    Button retryDrawingAnalysis = secondaryButton("Try AI again");
-                    retryDrawingAnalysis.setOnClickListener(v -> analyzeDrawing());
+                if (DrawingRetryPolicy.offerOriginalRetry(
+                        drawingAnalysisInProgress,
+                        aiDrawingLastError)) {
+                    Button retryDrawingAnalysis = secondaryButton("Try original drawing again");
+                    retryDrawingAnalysis.setOnClickListener(v -> analyzeActiveDrawing(false));
                     page.addView(retryDrawingAnalysis);
+                }
+                if (DrawingRetryPolicy.offerEnhancedRetry(
+                        drawingAnalysisInProgress,
+                        hasActiveDrawingResult(),
+                        aiDrawingCanCalculate,
+                        aiDrawingLastError)) {
+                    Button retryEnhancedDrawing = secondaryButton("Try enhanced black-and-white");
+                    retryEnhancedDrawing.setOnClickListener(v -> analyzeActiveDrawing(true));
+                    page.addView(retryEnhancedDrawing);
+                    addHelp("Enhanced mode may help faint handwriting. Use the original-color result for clean CAD drawings when it is complete.");
                 }
 
                 detach(drawingProgressBar);
@@ -1252,40 +1423,7 @@ public class MainActivity extends Activity {
             }
         }
 
-        Button manualMeasurement = accordionButton("Manual Measurement", photoAccordionOpen == 3);
-        manualMeasurement.setOnClickListener(v -> togglePhotoAccordion(3));
-        page.addView(manualMeasurement);
-        if (photoAccordionOpen == 3) {
-            addHelp("L is length in inches. W is width in inches. T is the calculated square feet for that piece. Finish W and the next blank row appears automatically.");
-            detach(manualMeasurementList);
-            page.addView(manualMeasurementList);
-            detach(manualMeasurementTotal);
-            page.addView(manualMeasurementTotal);
-            renderManualMeasurements(false);
-            addHelp("Manual pieces are added to the verified AI drawing total. Use this for extra countertop areas that are not already included in the AI drawing.");
-        }
-
-        Button countertopPhoto = accordionButton("Photos of actual countertop", photoAccordionOpen == 1);
-        countertopPhoto.setOnClickListener(v -> togglePhotoAccordion(1));
-        page.addView(countertopPhoto);
-        if (photoAccordionOpen == 1) {
-            addHelp("Add photos of the customer's actual kitchen or countertop. These photos go with the email.");
-            Button cameraButton = primaryButton("Take photo of countertop");
-            cameraButton.setOnClickListener(v -> takeCountertopPhoto());
-            page.addView(cameraButton);
-            Button photoButton = secondaryButton("Choose countertop photo from phone");
-            photoButton.setOnClickListener(v -> openPhotoPicker());
-            page.addView(photoButton);
-            if (!countertopPhotoUris.isEmpty()) {
-                detach(photoStatus);
-                page.addView(photoStatus);
-                detach(roomPhoto);
-                page.addView(roomPhoto, new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, dp(220)));
-            }
-
-        }
-        addHelp("You may skip this page and tap Next.");
+        addHelp("You may skip this page and tap Next. Manual measurements and countertop photos are on the next two pages.");
         addInlineNavigation();
     }
 
@@ -1564,7 +1702,7 @@ public class MainActivity extends Activity {
         calculateAndDisplay(false);
         if (manualMeasurementList != null) {
             manualMeasurementList.post(() -> {
-                if (photoAccordionOpen == 3 && currentPageId() == PAGE_PHOTO) {
+                if (photoAccordionOpen == 3 && currentPageId() == PAGE_MANUAL_MEASUREMENT) {
                     renderManualMeasurements(focusNewPiece);
                 }
             });
@@ -1606,6 +1744,26 @@ public class MainActivity extends Activity {
         return number.format(value);
     }
 
+    private void addWorkflowCompleteStep() {
+        hideKeyboard();
+        saveJobSnapshot();
+        page.addView(questionTitle("Job workflow complete"));
+        addEstimateSummary(calculateAndDisplay(false));
+        addHelp("The job is saved in the searchable history on this phone.");
+        Button email = secondaryButton("Prepare office email");
+        email.setOnClickListener(v -> sendQuoteEmail());
+        page.addView(email);
+        Button back = secondaryButton("Back");
+        back.setOnClickListener(v -> {
+            stepIndex = Math.max(0, pageOrder.size() - 1);
+            showStep();
+        });
+        page.addView(back);
+        Button reset = primaryButton("Start a new customer");
+        reset.setOnClickListener(v -> confirmReset());
+        page.addView(reset);
+    }
+
     private void addReviewStep() {
         hideKeyboard();
         page.clearFocus();
@@ -1613,7 +1771,7 @@ public class MainActivity extends Activity {
         page.addView(questionTitle("Review the quote request"));
 
         TextView customer = label(
-                "Customer: " + text(customerName) + "\n" +
+                "Customer: " + customerFullName() + "\n" +
                 "Phone: " + text(customerPhone) + "\n" +
                 "Email: " + text(customerEmail) + "\n" +
                 "Address: " + text(projectAddress));
@@ -1663,7 +1821,7 @@ public class MainActivity extends Activity {
             File quoteDirectory = new File(getFilesDir(), "quote_pdfs");
             File quoteFile = new File(
                     quoteDirectory,
-                    "Ramsiers-Quote-Request-" + safeFileName(text(customerName)) + ".pdf");
+                    "Ramsiers-Quote-Request-" + safeFileName(customerFullName()) + ".pdf");
             QuotePdfGenerator.create(quoteFile, data);
             PrintManager printManager = (PrintManager) getSystemService(Context.PRINT_SERVICE);
             if (printManager == null) {
@@ -1683,6 +1841,23 @@ public class MainActivity extends Activity {
     }
 
     private void confirmFinishedAndTextQuote(Button textQuoteButton) {
+        if (!jobFinished) {
+            Toast.makeText(this, "Mark the installation job finished before creating a payment link.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (!customerSigned) {
+            Toast.makeText(this, "Collect the customer's final quote signature before creating a payment link.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (!paymentMethod.startsWith("ACH")) {
+            Toast.makeText(this, "Choose ACH bank account as the payment method first.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (customerPhone.getText().toString().trim().isEmpty()
+                && customerEmail.getText().toString().trim().isEmpty()) {
+            Toast.makeText(this, "Add the customer's phone number or email address first.", Toast.LENGTH_LONG).show();
+            return;
+        }
         Estimate estimate = calculateAndDisplay(false);
         long amountCents = Math.round(estimate.total * 100.0);
         if (amountCents < 50) {
@@ -1714,18 +1889,26 @@ public class MainActivity extends Activity {
             if (amountCents < 50) {
                 throw new IllegalStateException("The full quote amount is missing.");
             }
-            QuotePdfGenerator.Data data = buildQuotePdfData(estimate);
             File quoteDirectory = new File(getFilesDir(), "quote_jpegs");
             File quoteImage = new File(
                     quoteDirectory,
-                    "Ramsiers-Final-Quote-" + safeFileName(text(customerName)) + ".jpg");
-            QuotePdfGenerator.createJpeg(quoteImage, data);
+                    "Ramsiers-Final-Quote-" + safeFileName(customerFullName()) + ".jpg");
+            QuotePdfGenerator.createJpeg(quoteImage, buildQuotePdfData(estimate));
             Uri imageUri = FileProvider.getUriForFile(
                     this,
                     getPackageName() + ".fileprovider",
                     quoteImage);
 
-            String phone = customerPhone.getText().toString().trim();
+            File pdfDirectory = new File(getFilesDir(), "quote_pdfs");
+            File quotePdf = new File(
+                    pdfDirectory,
+                    "Ramsiers-Signed-Final-Quote-" + safeFileName(customerFullName()) + ".pdf");
+            QuotePdfGenerator.create(quotePdf, buildQuotePdfData(estimate));
+            Uri pdfUri = FileProvider.getUriForFile(
+                    this,
+                    getPackageName() + ".fileprovider",
+                    quotePdf);
+
             String quoteReference = paymentQuoteReference(amountCents);
             paymentLinkRequestInProgress = true;
             textQuoteButton.setEnabled(false);
@@ -1743,11 +1926,15 @@ public class MainActivity extends Activity {
                     runOnUiThread(() -> {
                         paymentLinkRequestInProgress = false;
                         textQuoteButton.setEnabled(true);
-                        openFinalQuoteMessage(
-                                phone,
-                                estimate,
-                                paymentUrl,
-                                imageUri);
+                        preparedPaymentUrl = paymentUrl;
+                        preparedPaymentAmountCents = amountCents;
+                        preparedPaymentImageUri = imageUri;
+                        preparedPaymentPdfUri = pdfUri;
+                        showStep();
+                        Toast.makeText(
+                                this,
+                                "Secure ACH link ready. Choose Text or Email, then review before sending.",
+                                Toast.LENGTH_LONG).show();
                     });
                 } catch (Exception exception) {
                     runOnUiThread(() -> {
@@ -1810,53 +1997,13 @@ public class MainActivity extends Activity {
 
     private QuotePdfGenerator.Data buildQuotePdfData(Estimate estimate) {
         QuotePdfGenerator.Data data = new QuotePdfGenerator.Data();
-        data.customer = text(customerName);
+        data.customer = customerFullName();
         data.phone = text(customerPhone);
         data.email = text(customerEmail);
         data.address = text(projectAddress);
         data.estimatedTotal = money(estimate.total);
 
-        double cooktopCount = value(cooktopCutoutQuantity);
-        double cooktopPrice = priceValue(PRICE_CUTOUT, 100);
-        if (cooktopCount > 0) {
-            addPdfPriceRow(
-                    data,
-                    "Cooktop or extra cutouts",
-                    quantityLabel(cooktopCount) + " × " + money(cooktopPrice),
-                    cooktopCount * cooktopPrice);
-        }
-
-        double edgeFeet = value(edgeLinearFeet);
-        double edgePrice = priceValue(PRICE_EDGE, 10);
-        if ("Eased and polished".equals(edgeDetail)) {
-            data.pricedOptions.add(new QuotePdfGenerator.PriceRow(
-                    "Edge detail",
-                    edgeDisplayName(edgeDetail) + " - Free",
-                    "$0.00"));
-        } else {
-            addPdfPriceRow(
-                    data,
-                    "Edge detail",
-                    edgeDisplayName(edgeDetail) + " - " + quantityLabel(edgeFeet)
-                            + " ft × " + money(edgePrice),
-                    edgeFeet * edgePrice);
-        }
-
-        addQuantityPdfPriceRow(data, "Ramsier's faucets", faucetQuantity, PRICE_FAUCET, 225);
-        addQuantityPdfPriceRow(data, "Basket drains", basketQuantity, PRICE_BASKET, 35);
-        addQuantityPdfPriceRow(data, "Big grids", gridQuantity, PRICE_GRID, 70);
-        double waterfallCount = value(waterfallQuantity);
-        if (waterfallCount > 0) {
-            addPdfPriceRow(
-                    data,
-                    "Waterfall sides",
-                    quantityLabel(waterfallCount) + " × " + money(WATERFALL_PRICE),
-                    waterfallCount * WATERFALL_PRICE);
-        }
-        if (value(sinkCharge) > 0) addPdfPriceRow(data, "Sink charge", "Additional sink charge", value(sinkCharge));
-        if (value(edgeCharge) > 0) addPdfPriceRow(data, "Extra edge labor", "Additional labor", value(edgeCharge));
-        if (value(tearOutCharge) > 0) addPdfPriceRow(data, "Tear-out", "Entered charge", value(tearOutCharge));
-        if (value(otherCharge) > 0) addPdfPriceRow(data, "Other charge", "Entered charge", value(otherCharge));
+        data.pricedOptions.addAll(buildQuotePriceRows(estimate));
 
         data.sinkSelections = sinkSelectionDisplay().replace(", ", "  |  ");
         data.sinkLocationNote = combinedSinkLocationNote();
@@ -1869,8 +2016,108 @@ public class MainActivity extends Activity {
         data.drawingDetails = printableDrawingDetails(estimate);
         data.countertopSections = printableCountertopSections();
         data.selectedSlabs = printableSelectedSlabs();
-        data.projectNotes = textOrNotProvided(projectNotes);
+        data.projectNotes = textOrNotProvided(projectNotes)
+                + "  |  Ramsier's does not disconnect, reconnect, or perform plumbing work."
+                + "  |  Plumbing notice acknowledged: " + yesNo(plumbingNoticeAcknowledged)
+                + "  |  Customer final-quote signature: " + (customerSigned ? "Accepted" : "Not collected");
+        if (customerSigned && signaturePad.hasInk()) {
+            data.signature = signaturePad.toBitmap();
+            data.signatureCustomer = customerFullName();
+            data.signatureDate = new SimpleDateFormat("MMM d, yyyy h:mm a", Locale.US).format(new Date());
+        }
         return data;
+    }
+
+    private void openFinalQuoteEmail(
+            String emailAddress,
+            Estimate estimate,
+            String paymentUrl,
+            Uri pdfUri) {
+        String messageText = "Ramsier's Granite and Quartz\n\n"
+                + "Your signed final quote is attached.\n"
+                + "Full amount due: " + money(estimate.total) + "\n"
+                + "Secure Stripe ACH payment link: " + paymentUrl;
+        Intent email = new Intent(Intent.ACTION_SEND);
+        email.setType("application/pdf");
+        email.putExtra(Intent.EXTRA_EMAIL, new String[]{emailAddress});
+        email.putExtra(Intent.EXTRA_SUBJECT, "Ramsier's signed final quote");
+        email.putExtra(Intent.EXTRA_TEXT, messageText);
+        email.putExtra(Intent.EXTRA_STREAM, pdfUri);
+        email.setClipData(ClipData.newUri(
+                getContentResolver(),
+                "Ramsier's signed final quote",
+                pdfUri));
+        email.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        try {
+            startActivity(Intent.createChooser(email, "Review and email the customer's final quote"));
+        } catch (Exception exception) {
+            Toast.makeText(this, "No email app was found. Nothing was sent.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private ArrayList<QuotePdfGenerator.PriceRow> buildQuotePriceRows(Estimate estimate) {
+        QuotePdfGenerator.Data rows = new QuotePdfGenerator.Data();
+        double installedPrice = effectivePricePerSquareFoot();
+        addPdfPriceRow(
+                rows,
+                "Countertop and installation",
+                quantityLabel(estimate.net) + " sq. ft. × " + money(installedPrice)
+                        + " | Slab: " + printableSelectedSlabs(),
+                estimate.net * installedPrice);
+
+        String sinks = sinkSelectionDisplay();
+        if (!"No sink selected".equals(sinks) || value(sinkCharge) > 0) {
+            rows.pricedOptions.add(new QuotePdfGenerator.PriceRow(
+                    "Sink selections",
+                    sinks,
+                    money(value(sinkCharge))));
+        }
+
+        double cooktopCount = value(cooktopCutoutQuantity);
+        double cooktopPrice = priceValue(PRICE_CUTOUT, 100);
+        if (cooktopCount > 0) {
+            addPdfPriceRow(
+                    rows,
+                    "Cooktop or extra cutouts",
+                    quantityLabel(cooktopCount) + " × " + money(cooktopPrice),
+                    cooktopCount * cooktopPrice);
+        }
+
+        double edgeFeet = value(edgeLinearFeet);
+        double edgePrice = priceValue(PRICE_EDGE, 10);
+        if ("Eased and polished".equals(edgeDetail)) {
+            rows.pricedOptions.add(new QuotePdfGenerator.PriceRow(
+                    "Edge detail",
+                    edgeDisplayName(edgeDetail) + " - Free",
+                    "$0.00"));
+        } else {
+            addPdfPriceRow(
+                    rows,
+                    "Edge detail",
+                    edgeDisplayName(edgeDetail) + " - " + quantityLabel(edgeFeet)
+                            + " ft × " + money(edgePrice),
+                    edgeFeet * edgePrice);
+        }
+
+        addQuantityPdfPriceRow(rows, "Ramsier's faucets", faucetQuantity, PRICE_FAUCET, 225);
+        addQuantityPdfPriceRow(rows, "Basket drains", basketQuantity, PRICE_BASKET, 35);
+        addQuantityPdfPriceRow(rows, "Big grids", gridQuantity, PRICE_GRID, 70);
+        double waterfallCount = value(waterfallQuantity);
+        if (waterfallCount > 0) {
+            addPdfPriceRow(
+                    rows,
+                    "Waterfall sides",
+                    quantityLabel(waterfallCount) + " × " + money(WATERFALL_PRICE),
+                    waterfallCount * WATERFALL_PRICE);
+        }
+        if (value(edgeCharge) > 0) addPdfPriceRow(rows, "Extra edge labor", "Additional labor", value(edgeCharge));
+        if (value(tearOutCharge) > 0) addPdfPriceRow(rows, "Tear-out", "Entered charge", value(tearOutCharge));
+        if (value(otherCharge) > 0) addPdfPriceRow(rows, "Other charge", "Entered charge", value(otherCharge));
+        if (countertopRemoval && removalCharge() > 0) {
+            addPdfPriceRow(rows, "Countertop removal",
+                    quantityLabel(value(removalSquareFeet)) + " sq. ft. × $10.00", removalCharge());
+        }
+        return new ArrayList<>(rows.pricedOptions);
     }
 
     private void addQuantityPdfPriceRow(
@@ -1974,7 +2221,7 @@ public class MainActivity extends Activity {
         Button back = secondaryButton("Back");
         back.setEnabled(stepIndex > 0);
         back.setOnClickListener(v -> {
-            if (currentPageId() == PAGE_PHOTO) commitPendingManualMeasurement(false);
+            if (currentPageId() == PAGE_MANUAL_MEASUREMENT) commitPendingManualMeasurement(false);
             hideKeyboard();
             stepIndex = Math.max(0, stepIndex - 1);
             showStep();
@@ -1997,7 +2244,7 @@ public class MainActivity extends Activity {
         Button back = secondaryButton("Back");
         back.setEnabled(stepIndex > 0);
         back.setOnClickListener(v -> {
-            if (currentPageId() == PAGE_PHOTO) commitPendingManualMeasurement(false);
+            if (currentPageId() == PAGE_MANUAL_MEASUREMENT) commitPendingManualMeasurement(false);
             hideKeyboard();
             stepIndex = Math.max(0, stepIndex - 1);
             showStep();
@@ -2023,10 +2270,10 @@ public class MainActivity extends Activity {
 
     private void handleNext() {
         int pageId = currentPageId();
-        if (pageId == PAGE_PHOTO) commitPendingManualMeasurement(false);
-        if (pageId == PAGE_NAME && customerName.getText().toString().trim().isEmpty()) {
-            Toast.makeText(this, "Enter the customer's name.", Toast.LENGTH_SHORT).show();
-            customerName.requestFocus();
+        if (pageId == PAGE_MANUAL_MEASUREMENT) commitPendingManualMeasurement(false);
+        if (pageId == PAGE_NAME && (isBlank(customerFirstName) || isBlank(customerLastName))) {
+            Toast.makeText(this, "Enter the customer's first and last name.", Toast.LENGTH_SHORT).show();
+            (isBlank(customerFirstName) ? customerFirstName : customerLastName).requestFocus();
             return;
         }
         if (pageId == PAGE_OFFICE_EMAIL) {
@@ -2057,6 +2304,29 @@ public class MainActivity extends Activity {
             showKeyboard(edgeLinearFeet);
             return;
         }
+        if (pageId == PAGE_COUNTERTOP_REMOVAL && countertopRemoval && value(removalSquareFeet) <= 0) {
+            Toast.makeText(this, "Enter the square feet being removed.", Toast.LENGTH_LONG).show();
+            removalSquareFeet.requestFocus();
+            return;
+        }
+        if (pageId == PAGE_TEMPLATE_UPDATE && effectivePricePerSquareFoot() <= 0) {
+            Toast.makeText(this, "Enter the final installed price per square foot.", Toast.LENGTH_LONG).show();
+            finalPricePerSqFt.requestFocus();
+            return;
+        }
+        if (pageId == PAGE_REVIEW_QUOTE && value(pricePerSqFt) <= 0) {
+            Toast.makeText(this, "Enter the installed price per square foot for the quote.", Toast.LENGTH_LONG).show();
+            pricePerSqFt.requestFocus();
+            return;
+        }
+        if (pageId == PAGE_CUSTOMER_SIGNATURE && !customerSigned) {
+            Toast.makeText(this, "Collect and accept the customer's final quote signature first.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (pageId == PAGE_PLUMBING_NOTICE && !plumbingNoticeAcknowledged) {
+            Toast.makeText(this, "Confirm that the customer was told Ramsier's does not do plumbing.", Toast.LENGTH_LONG).show();
+            return;
+        }
         if (pageId >= CUSTOM_PAGE_START) {
             EditText field = customInputs.get(pageId);
             if (field != null) {
@@ -2081,10 +2351,164 @@ public class MainActivity extends Activity {
     }
 
     private int totalSteps() {
-        return pageOrder.size() + 1;
+        return pageOrder.size();
+    }
+
+    private void requestAdminAccess() {
+        hideKeyboard();
+        if (adminSessionExpiresAt > System.currentTimeMillis()) {
+            adminSessionExpiresAt = System.currentTimeMillis() + ADMIN_SESSION_MILLIS;
+            showLiveEditScreen();
+            return;
+        }
+        if (!prefs.contains(ADMIN_PIN_HASH) || !prefs.contains(ADMIN_PIN_SALT)) {
+            showCreateAdminPinDialog(false);
+            return;
+        }
+        long lockUntil = prefs.getLong(ADMIN_PIN_LOCK_UNTIL, 0);
+        if (lockUntil > System.currentTimeMillis()) {
+            long seconds = Math.max(1, (lockUntil - System.currentTimeMillis() + 999) / 1000);
+            Toast.makeText(this, "Admin access is locked for " + seconds + " more seconds.", Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        EditText pin = adminPinField("6-digit owner PIN");
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Admin access")
+                .setMessage("Enter the owner PIN to change prices, product pictures, or pages.")
+                .setView(pin)
+                .setPositiveButton("Unlock", null)
+                .setNegativeButton("Cancel", null)
+                .create();
+        dialog.setOnShowListener(ignored -> {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(button -> {
+                if (verifyAdminPin(pin.getText().toString())) {
+                    prefs.edit()
+                            .putInt(ADMIN_PIN_FAILURES, 0)
+                            .remove(ADMIN_PIN_LOCK_UNTIL)
+                            .apply();
+                    adminSessionExpiresAt = System.currentTimeMillis() + ADMIN_SESSION_MILLIS;
+                    dialog.dismiss();
+                    showLiveEditScreen();
+                    return;
+                }
+                int failures = prefs.getInt(ADMIN_PIN_FAILURES, 0) + 1;
+                SharedPreferences.Editor editor = prefs.edit().putInt(ADMIN_PIN_FAILURES, failures);
+                if (failures >= 5) {
+                    editor.putInt(ADMIN_PIN_FAILURES, 0)
+                            .putLong(ADMIN_PIN_LOCK_UNTIL, System.currentTimeMillis() + 60_000L);
+                }
+                editor.apply();
+                pin.setText("");
+                pin.setError(failures >= 5
+                        ? "Too many attempts. Admin access is locked for 60 seconds."
+                        : "That PIN is incorrect.");
+            });
+            pin.requestFocus();
+            pin.postDelayed(() -> showKeyboard(pin), 180);
+        });
+        dialog.show();
+    }
+
+    private void showCreateAdminPinDialog(boolean replacing) {
+        if (replacing && !requireActiveAdminSession()) return;
+        LinearLayout form = new LinearLayout(this);
+        form.setOrientation(LinearLayout.VERTICAL);
+        form.setPadding(dp(22), dp(6), dp(22), 0);
+        EditText pin = adminPinField("Create a 6-digit owner PIN");
+        EditText confirm = adminPinField("Enter the same PIN again");
+        form.addView(pin);
+        form.addView(confirm);
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(replacing ? "Change admin PIN" : "Create admin PIN")
+                .setMessage("This PIN protects price, picture, and page changes on this phone.")
+                .setView(form)
+                .setPositiveButton("Save PIN", null)
+                .setNegativeButton("Cancel", null)
+                .create();
+        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener(button -> {
+                    String first = pin.getText().toString();
+                    String second = confirm.getText().toString();
+                    if (!first.matches("\\d{6}")) {
+                        pin.setError("Use exactly 6 numbers.");
+                        return;
+                    }
+                    if (!first.equals(second)) {
+                        confirm.setError("The PINs do not match.");
+                        return;
+                    }
+                    try {
+                        saveAdminPin(first);
+                    } catch (Exception exception) {
+                        pin.setError("The PIN could not be protected on this phone.");
+                        return;
+                    }
+                    adminSessionExpiresAt = System.currentTimeMillis() + ADMIN_SESSION_MILLIS;
+                    dialog.dismiss();
+                    showLiveEditScreen();
+                    Toast.makeText(this, replacing ? "Admin PIN changed." : "Admin PIN created.", Toast.LENGTH_SHORT).show();
+                }));
+        dialog.show();
+    }
+
+    private EditText adminPinField(String hint) {
+        EditText field = input(hint,
+                InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+        field.setSingleLine(true);
+        return field;
+    }
+
+    private void saveAdminPin(String pin) {
+        try {
+            byte[] salt = new byte[16];
+            new SecureRandom().nextBytes(salt);
+            byte[] hash = adminPinHash(pin, salt);
+            prefs.edit()
+                    .putString(ADMIN_PIN_SALT, Base64.encodeToString(salt, Base64.NO_WRAP))
+                    .putString(ADMIN_PIN_HASH, Base64.encodeToString(hash, Base64.NO_WRAP))
+                    .putInt(ADMIN_PIN_FAILURES, 0)
+                    .remove(ADMIN_PIN_LOCK_UNTIL)
+                    .apply();
+        } catch (Exception exception) {
+            throw new IllegalStateException("The admin PIN could not be protected.", exception);
+        }
+    }
+
+    private boolean verifyAdminPin(String pin) {
+        try {
+            if (!pin.matches("\\d{6}")) return false;
+            byte[] salt = Base64.decode(prefs.getString(ADMIN_PIN_SALT, ""), Base64.NO_WRAP);
+            byte[] expected = Base64.decode(prefs.getString(ADMIN_PIN_HASH, ""), Base64.NO_WRAP);
+            return MessageDigest.isEqual(expected, adminPinHash(pin, salt));
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private byte[] adminPinHash(String pin, byte[] salt) throws Exception {
+        PBEKeySpec spec = new PBEKeySpec(pin.toCharArray(), salt, ADMIN_PIN_ITERATIONS, 256);
+        try {
+            return SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+                    .generateSecret(spec)
+                    .getEncoded();
+        } finally {
+            spec.clearPassword();
+        }
+    }
+
+    private boolean requireActiveAdminSession() {
+        if (adminSessionExpiresAt <= System.currentTimeMillis()) {
+            adminSessionExpiresAt = 0;
+            requestAdminAccess();
+            return false;
+        }
+        adminSessionExpiresAt = System.currentTimeMillis() + ADMIN_SESSION_MILLIS;
+        return true;
     }
 
     private void showLiveEditScreen() {
+        if (!requireActiveAdminSession()) return;
         hideKeyboard();
         page.removeAllViews();
         navigation.removeAllViews();
@@ -2095,6 +2519,18 @@ public class MainActivity extends Activity {
         Button managePages = primaryButton("Add, remove, rename, or move pages");
         managePages.setOnClickListener(v -> showManagePagesScreen());
         page.addView(managePages);
+
+        Button changePin = secondaryButton("Change admin PIN");
+        changePin.setOnClickListener(v -> showCreateAdminPinDialog(true));
+        page.addView(changePin);
+
+        page.addView(sectionHeader("Shared customer jobs"));
+        addHelp(connectedCustomerJobsFolderMessage());
+        Button connectDrive = primaryButton(hasCustomerJobsFolder()
+                ? "Change shared Google Drive folder"
+                : "Connect shared Google Drive folder");
+        connectDrive.setOnClickListener(v -> openCustomerJobsFolderPicker());
+        page.addView(connectDrive);
 
         page.addView(sectionHeader("Prices"));
         EditText cutoutPrice = editorField(
@@ -2112,6 +2548,18 @@ public class MainActivity extends Activity {
         EditText gridPrice = editorField(
                 "Big grid price each",
                 priceValue(PRICE_GRID, 70));
+
+        page.addView(sectionHeader("Product pictures"));
+        addAdminProductImageButton("Equal double-bowl sink", R.drawable.sink_equal_double);
+        addAdminProductImageButton("Offset double-bowl sink", R.drawable.sink_offset_double);
+        addAdminProductImageButton("Single-bowl sink", R.drawable.sink_single_bowl);
+        addAdminProductImageButton("Rectangle vanity sink", R.drawable.vanity_sink_rectangle);
+        addAdminProductImageButton("Oval vanity sink", R.drawable.vanity_sink_oval);
+        addAdminProductImageButton("Edge detail chart", R.drawable.edge_details);
+        addAdminProductImageButton("Ramsier's faucet", R.drawable.ramsiers_faucet);
+        addAdminProductImageButton("Basket drain", R.drawable.basket_drain);
+        addAdminProductImageButton("Big sink grid", R.drawable.sink_grid);
+        addAdminProductImageButton("Waterfall example", R.drawable.waterfall_countertop);
 
         page.addView(sectionHeader("Edge choice names"));
         EditText easedName = editorTextField(
@@ -2174,6 +2622,7 @@ public class MainActivity extends Activity {
             EditText bigRoundName,
             EditText bevelName,
             EditText bigBevelName) {
+        if (!requireActiveAdminSession()) return false;
         if (value(cutoutPrice) < 0
                 || value(edgePrice) < 0
                 || value(faucetPrice) < 0
@@ -2203,6 +2652,58 @@ public class MainActivity extends Activity {
                 .putString("edge_name_big_bevel", bigBevelName.getText().toString().trim())
                 .apply();
         return true;
+    }
+
+    private void addAdminProductImageButton(String label, int imageResource) {
+        String preferenceKey = productImagePreferenceKey(imageResource);
+        LinearLayout row = itemRow();
+        row.setOrientation(LinearLayout.VERTICAL);
+        TextView name = label(label + (prefs.getString(preferenceKey, "").isEmpty()
+                ? " — original picture"
+                : " — custom picture"));
+        name.setTypeface(Typeface.DEFAULT_BOLD);
+        row.addView(name);
+        LinearLayout buttons = new LinearLayout(this);
+        buttons.setOrientation(LinearLayout.HORIZONTAL);
+        Button replace = miniButton("REPLACE");
+        replace.setOnClickListener(v -> openAdminProductImagePicker(preferenceKey));
+        buttons.addView(replace, new LinearLayout.LayoutParams(0, dp(46), 1f));
+        Button original = miniButton("USE ORIGINAL");
+        original.setEnabled(!prefs.getString(preferenceKey, "").isEmpty());
+        original.setOnClickListener(v -> {
+            if (!requireActiveAdminSession()) return;
+            prefs.edit().remove(preferenceKey).apply();
+            adminSessionExpiresAt = System.currentTimeMillis() + ADMIN_SESSION_MILLIS;
+            showLiveEditScreen();
+        });
+        buttons.addView(original, new LinearLayout.LayoutParams(0, dp(46), 1f));
+        row.addView(buttons);
+        page.addView(row);
+    }
+
+    private void openAdminProductImagePicker(String preferenceKey) {
+        if (!requireActiveAdminSession()) return;
+        pendingProductImageKey = preferenceKey;
+        Intent image = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        image.addCategory(Intent.CATEGORY_OPENABLE);
+        image.setType("image/*");
+        image.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        startActivityForResult(image, PICK_ADMIN_PRODUCT_IMAGE);
+    }
+
+    private String productImagePreferenceKey(int imageResource) {
+        if (imageResource == R.drawable.sink_equal_double) return "product_image_sink_equal_double";
+        if (imageResource == R.drawable.sink_offset_double) return "product_image_sink_offset_double";
+        if (imageResource == R.drawable.sink_single_bowl) return "product_image_sink_single_bowl";
+        if (imageResource == R.drawable.vanity_sink_rectangle) return "product_image_vanity_rectangle";
+        if (imageResource == R.drawable.vanity_sink_oval) return "product_image_vanity_oval";
+        if (imageResource == R.drawable.edge_details) return "product_image_edge_details";
+        if (imageResource == R.drawable.ramsiers_faucet) return "product_image_faucet";
+        if (imageResource == R.drawable.basket_drain) return "product_image_basket";
+        if (imageResource == R.drawable.sink_grid) return "product_image_grid";
+        if (imageResource == R.drawable.waterfall_countertop) return "product_image_waterfall";
+        return "product_image_" + imageResource;
     }
 
     private void shareLiveEditorChanges() {
@@ -2255,6 +2756,7 @@ public class MainActivity extends Activity {
     }
 
     private void showManagePagesScreen(int keepIndexVisible) {
+        if (!requireActiveAdminSession()) return;
         hideKeyboard();
         page.removeAllViews();
         navigation.removeAllViews();
@@ -2329,6 +2831,7 @@ public class MainActivity extends Activity {
     }
 
     private void movePage(int from, int to) {
+        if (!requireActiveAdminSession()) return;
         if (from < 0 || to < 0 || from >= pageOrder.size() || to >= pageOrder.size()) return;
         int pageId = pageOrder.remove(from);
         pageOrder.add(to, pageId);
@@ -2344,6 +2847,7 @@ public class MainActivity extends Activity {
     }
 
     private void removePage(int index) {
+        if (!requireActiveAdminSession()) return;
         if (index < 0 || index >= pageOrder.size()) return;
         pageOrder.remove(index);
         if (stepIndex >= pageOrder.size()) {
@@ -2354,6 +2858,7 @@ public class MainActivity extends Activity {
     }
 
     private void showAddPageDialog() {
+        if (!requireActiveAdminSession()) return;
         ArrayList<Integer> availableIds = new ArrayList<>();
         ArrayList<String> labels = new ArrayList<>();
         for (int pageId : allBuiltInPageIds()) {
@@ -2386,6 +2891,7 @@ public class MainActivity extends Activity {
     }
 
     private void showEditPageDialog(int pageId) {
+        if (!requireActiveAdminSession()) return;
         LinearLayout form = new LinearLayout(this);
         form.setOrientation(LinearLayout.VERTICAL);
         form.setPadding(dp(12), dp(8), dp(12), 0);
@@ -2430,6 +2936,7 @@ public class MainActivity extends Activity {
     }
 
     private void showCustomPageDialog() {
+        if (!requireActiveAdminSession()) return;
         LinearLayout form = new LinearLayout(this);
         form.setOrientation(LinearLayout.VERTICAL);
         form.setPadding(dp(12), dp(8), dp(12), 0);
@@ -2639,7 +3146,7 @@ public class MainActivity extends Activity {
                 hasAiDrawing);
         double gross = squareFeet.grossSquareFeet;
         double stove = squareFeet.stoveSquareFeet;
-        double net = squareFeet.netSquareFeet;
+        double net = JobWorkflow.finalSquareFeet(squareFeet.netSquareFeet, value(additionalSquareFeet));
         double cooktopPrice = priceValue(PRICE_CUTOUT, 100);
         double edgePrice = priceValue(PRICE_EDGE, 10);
         double faucetPrice = priceValue(PRICE_FAUCET, 225);
@@ -2653,7 +3160,7 @@ public class MainActivity extends Activity {
         double basketTotal = value(basketQuantity) * basketPrice;
         double gridTotal = value(gridQuantity) * gridPrice;
         double waterfallTotal = value(waterfallQuantity) * WATERFALL_PRICE;
-        double total = net * value(pricePerSqFt)
+        double total = net * effectivePricePerSquareFoot()
                 + value(sinkCharge)
                 + value(edgeCharge)
                 + value(tearOutCharge)
@@ -2663,7 +3170,8 @@ public class MainActivity extends Activity {
                 + faucetTotal
                 + basketTotal
                 + gridTotal
-                + waterfallTotal;
+                + waterfallTotal
+                + removalCharge();
 
         if (squareFootResult != null) squareFootResult.setText("Net square footage: " + number.format(net));
         if (totalResult != null) totalResult.setText("Estimated total: $" + number.format(total));
@@ -2718,6 +3226,11 @@ public class MainActivity extends Activity {
                 + "\nCabinets in: " + yesNo(value(cabinetInQuantity) > 0)
                 + "\nCabinet date / notes: " + textOrNotProvided(cabinetsApproximateDate)
                 + "\nCabinet comments: " + textOrNotProvided(cabinetInterestComments)
+                + "\nAdditional template square feet: " + number.format(value(additionalSquareFeet))
+                + "\nCountertop removal: " + (countertopRemoval
+                ? number.format(value(removalSquareFeet)) + " sq ft × $10.00 = " + money(removalCharge())
+                : "No")
+                + "\nPlumbing work by Ramsier's: No"
                 + drawingEstimateSummary();
     }
 
@@ -2811,6 +3324,437 @@ public class MainActivity extends Activity {
                 | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
         intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
         startActivityForResult(intent, PICK_DRAWING_IMAGE);
+    }
+
+    private void addCustomerNameStep() {
+        page.addView(questionTitle(questionText(PAGE_NAME, "What is the customer's name?")));
+        addHelp("First and last names are stored separately so jobs remain easy to search.");
+        detach(customerFirstName);
+        page.addView(customerFirstName);
+        detach(customerLastName);
+        page.addView(customerLastName);
+        addInlineNavigation();
+        customerFirstName.requestFocus();
+        customerFirstName.postDelayed(() -> showKeyboard(customerFirstName), 220);
+    }
+
+    private void addJobSearchStep() {
+        hideKeyboard();
+        page.addView(questionTitle("Find a job or start a new one"));
+        addHelp("Search by any saved word. The shared Google Drive folder lets authorized employees see the same customer jobs.");
+        detach(jobSearchInput);
+        page.addView(jobSearchInput);
+        Button search = primaryButton("Search saved jobs");
+        search.setOnClickListener(v -> showJobSearchResults(jobSearchInput.getText().toString()));
+        page.addView(search);
+        Button history = secondaryButton("View all saved jobs");
+        history.setOnClickListener(v -> showJobSearchResults(""));
+        page.addView(history);
+        Button driveSearch = primaryButton("Search all shared Drive jobs");
+        driveSearch.setOnClickListener(v -> showDriveJobSearchResults(jobSearchInput.getText().toString()));
+        page.addView(driveSearch);
+        Button driveSave = secondaryButton("Save current customer to Drive");
+        driveSave.setOnClickListener(v -> saveCurrentJobToDrive());
+        page.addView(driveSave);
+        addHelp(connectedCustomerJobsFolderMessage());
+        Button admin = secondaryButton("Admin settings");
+        admin.setOnClickListener(v -> requestAdminAccess());
+        page.addView(admin);
+        addHelp("Tap Next to start or continue the current job.");
+        addInlineNavigation();
+    }
+
+    private void addManualMeasurementStep() {
+        hideKeyboard();
+        page.addView(questionTitle("Manual measurement"));
+        addHelp("L is length in inches. W is width in inches. T is the calculated square feet. Use this only for countertop not already counted by the drawing AI.");
+        photoAccordionOpen = 3;
+        detach(manualMeasurementList);
+        page.addView(manualMeasurementList);
+        detach(manualMeasurementTotal);
+        page.addView(manualMeasurementTotal);
+        renderManualMeasurements(false);
+        addInlineNavigation();
+    }
+
+    private void addCountertopPhotosStep() {
+        hideKeyboard();
+        page.addView(questionTitle("Photos of the actual countertop"));
+        addHelp("These pictures stay with the job and can be included in the office email. They are never sent to Stripe.");
+        Button camera = primaryButton("Take photo of countertop");
+        camera.setOnClickListener(v -> takeCountertopPhoto());
+        page.addView(camera);
+        Button gallery = secondaryButton("Choose countertop photo from phone");
+        gallery.setOnClickListener(v -> openPhotoPicker());
+        page.addView(gallery);
+        if (!countertopPhotoUris.isEmpty()) {
+            detach(photoStatus);
+            page.addView(photoStatus);
+            detach(roomPhoto);
+            page.addView(roomPhoto, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(220)));
+        }
+        addInlineNavigation();
+    }
+
+    private void addCountertopRemovalStep() {
+        hideKeyboard();
+        page.addView(questionTitle("Does Ramsier's remove the old countertop?"));
+        addHelp("Removal is $10.00 per square foot.");
+        RadioGroup choices = yesNoGroup(countertopRemoval);
+        choices.setOnCheckedChangeListener((group, checkedId) -> {
+            countertopRemoval = checkedYes(group, checkedId);
+            if (countertopRemoval && value(removalSquareFeet) <= 0) {
+                removalSquareFeet.setText(number.format(calculateAndDisplay(false).net));
+            }
+        });
+        page.addView(choices);
+        detach(removalSquareFeet);
+        page.addView(removalSquareFeet);
+        addInlineNavigation();
+    }
+
+    private void addQuoteReviewPage() {
+        hideKeyboard();
+        page.addView(questionTitle("Review quote request"));
+        addHelp("Enter the installed price per square foot for this quote.");
+        detach(pricePerSqFt);
+        page.addView(pricePerSqFt);
+        Estimate estimate = calculateAndDisplay(false);
+        addEstimateSummary(estimate);
+        addHelp("This is the first quote. The template worker can add square footage and change the final price later without changing the drawings.");
+        addInlineNavigation();
+    }
+
+    private void addPrintQuotePage() {
+        hideKeyboard();
+        page.addView(questionTitle("Print or save the quote PDF"));
+        addEstimateSummary(calculateAndDisplay(false));
+        Button print = primaryButton("Print / Save PDF");
+        print.setOnClickListener(v -> printQuoteSummary());
+        page.addView(print);
+        addInlineNavigation();
+    }
+
+    private void addTemplateUpdatePage() {
+        hideKeyboard();
+        page.addView(questionTitle("Template update"));
+        addHelp("Enter only extra square footage found at the house. The original drawing remains unchanged.");
+        detach(additionalSquareFeet);
+        page.addView(additionalSquareFeet);
+        if (isBlank(finalPricePerSqFt)) finalPricePerSqFt.setText(number.format(value(pricePerSqFt)));
+        detach(finalPricePerSqFt);
+        page.addView(finalPricePerSqFt);
+        addHelp("The final quote recalculates from these entries.");
+        addInlineNavigation();
+    }
+
+    private void addFinalQuotePage() {
+        hideKeyboard();
+        page.addView(questionTitle("Final quote"));
+        addEstimateSummary(calculateAndDisplay(false));
+        addHelp("Review the completed amount with the customer before collecting a signature.");
+        addInlineNavigation();
+    }
+
+    private void addCustomerSignaturePage() {
+        hideKeyboard();
+        page.addView(questionTitle("Customer signature"));
+        addHelp("The customer signs after the template and final quote are approved. Any later price change requires a new signature.");
+        detach(signaturePad);
+        page.addView(signaturePad, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(230)));
+        Button clear = secondaryButton("Clear signature");
+        clear.setOnClickListener(v -> {
+            signaturePad.clear();
+            customerSigned = false;
+        });
+        page.addView(clear);
+        Button accept = primaryButton(customerSigned ? "Signature accepted" : "Accept customer signature");
+        accept.setOnClickListener(v -> {
+            if (!signaturePad.hasInk()) {
+                Toast.makeText(this, "Ask the customer to sign in the box first.", Toast.LENGTH_LONG).show();
+                return;
+            }
+            customerSigned = true;
+            saveJobSnapshot();
+            Toast.makeText(this, "Customer signature accepted for this final quote.", Toast.LENGTH_LONG).show();
+            showStep();
+        });
+        page.addView(accept);
+        addInlineNavigation();
+    }
+
+    private void addSignedQuotePage() {
+        hideKeyboard();
+        page.addView(questionTitle("Signed quote copy"));
+        addEstimateSummary(calculateAndDisplay(false));
+        addHelp(customerSigned
+                ? "The customer signature has been accepted. Print or save the locked final quote copy."
+                : "Go back and collect the customer's signature before creating the signed quote copy.");
+        Button print = primaryButton("Print / Save signed quote");
+        print.setEnabled(customerSigned);
+        print.setOnClickListener(v -> printQuoteSummary());
+        page.addView(print);
+        addInlineNavigation();
+    }
+
+    private void addCalendarPage(boolean template) {
+        hideKeyboard();
+        String prefix = template ? "TP" : "IN";
+        int color = template ? Color.BLUE : Color.RED;
+        page.addView(questionTitle(prefix + " " + calendarJobName()));
+        addHelp(template
+                ? "The template appointment is marked blue. Review it in Google Calendar before saving."
+                : "The installation appointment is marked red. Review it in Google Calendar before saving.");
+        EditText dateField = template ? templateDateTime : installationDateTime;
+        dateField.setFocusable(false);
+        dateField.setClickable(true);
+        dateField.setOnClickListener(v -> chooseAppointmentDateTime(template));
+        detach(dateField);
+        page.addView(dateField);
+        Button choose = secondaryButton(dateField.getText().toString().trim().isEmpty()
+                ? "Choose date and time"
+                : "Change date and time");
+        choose.setOnClickListener(v -> chooseAppointmentDateTime(template));
+        page.addView(choose);
+        Button calendar = primaryButton("Add to Google Calendar");
+        long appointmentMillis = template ? templateAppointmentMillis : installationAppointmentMillis;
+        calendar.setEnabled(appointmentMillis > 0);
+        calendar.setOnClickListener(v -> openCalendarInsert(
+                prefix + " " + calendarJobName(),
+                color,
+                template ? templateAppointmentMillis : installationAppointmentMillis));
+        page.addView(calendar);
+        if (appointmentMillis <= 0) addHelp("Choose the appointment date and time first.");
+        addInlineNavigation();
+    }
+
+    private void chooseAppointmentDateTime(boolean template) {
+        Calendar selected = Calendar.getInstance();
+        long current = template ? templateAppointmentMillis : installationAppointmentMillis;
+        if (current > 0) {
+            selected.setTimeInMillis(current);
+        } else {
+            selected.add(Calendar.HOUR_OF_DAY, 1);
+            selected.set(Calendar.MINUTE, 0);
+        }
+        DatePickerDialog dateDialog = new DatePickerDialog(
+                this,
+                (datePicker, year, month, day) -> {
+                    selected.set(Calendar.YEAR, year);
+                    selected.set(Calendar.MONTH, month);
+                    selected.set(Calendar.DAY_OF_MONTH, day);
+                    TimePickerDialog timeDialog = new TimePickerDialog(
+                            this,
+                            (timePicker, hour, minute) -> {
+                                selected.set(Calendar.HOUR_OF_DAY, hour);
+                                selected.set(Calendar.MINUTE, minute);
+                                selected.set(Calendar.SECOND, 0);
+                                selected.set(Calendar.MILLISECOND, 0);
+                                long millis = selected.getTimeInMillis();
+                                EditText field = template ? templateDateTime : installationDateTime;
+                                field.setText(new SimpleDateFormat(
+                                        "EEE, MMM d, yyyy 'at' h:mm a",
+                                        Locale.US).format(new Date(millis)));
+                                if (template) templateAppointmentMillis = millis;
+                                else installationAppointmentMillis = millis;
+                                saveJobSnapshot();
+                                showStep();
+                            },
+                            selected.get(Calendar.HOUR_OF_DAY),
+                            selected.get(Calendar.MINUTE),
+                            false);
+                    timeDialog.setTitle("Choose appointment time");
+                    timeDialog.show();
+                },
+                selected.get(Calendar.YEAR),
+                selected.get(Calendar.MONTH),
+                selected.get(Calendar.DAY_OF_MONTH));
+        dateDialog.setTitle("Choose appointment date");
+        dateDialog.getDatePicker().setMinDate(System.currentTimeMillis() - 1000);
+        dateDialog.show();
+    }
+
+    private void addInstallationJobPage() {
+        hideKeyboard();
+        page.addView(questionTitle("Installation job"));
+        TextView summary = label("Job: " + calendarJobName() + "\nAddress: " + text(projectAddress)
+                + "\nFinal square feet: " + number.format(calculateAndDisplay(false).net)
+                + "\nFinal total: " + money(calculateAndDisplay(false).total));
+        summary.setBackgroundColor(Color.WHITE);
+        summary.setPadding(dp(12), dp(12), dp(12), dp(12));
+        page.addView(summary);
+        addHelp("The installer can review the drawings, selections and signed final quote before starting.");
+        addInlineNavigation();
+    }
+
+    private void addJobFinishedPage() {
+        hideKeyboard();
+        page.addView(questionTitle("Is the countertop job finished?"));
+        addHelp("A payment link cannot be created until this is Yes.");
+        RadioGroup choices = yesNoGroup(jobFinished);
+        choices.setOnCheckedChangeListener((group, checkedId) -> jobFinished = checkedYes(group, checkedId));
+        page.addView(choices);
+        addInlineNavigation();
+    }
+
+    private void addCreditPolicyPage() {
+        hideKeyboard();
+        page.addView(questionTitle("Credit-card policy explained?"));
+        addHelp("Ramsier's does not accept debit or prepaid cards for the 3% credit-card option. Card or wallet details must be entered only in Chase or another approved hosted checkout, never in this app.");
+        RadioGroup choices = yesNoGroup(creditCardPolicyAcknowledged);
+        choices.setOnCheckedChangeListener((group, checkedId) -> creditCardPolicyAcknowledged = checkedYes(group, checkedId));
+        page.addView(choices);
+        addInlineNavigation();
+    }
+
+    private void addPaymentMethodPage() {
+        hideKeyboard();
+        page.addView(questionTitle("Payment method"));
+        addHelp("ACH is recommended for a large countertop balance.");
+        RadioGroup choices = new RadioGroup(this);
+        String[] methods = {"ACH bank account", "Paper check", "Eligible credit card or digital wallet through Chase"};
+        for (String method : methods) {
+            RadioButton choice = radioButton(method, method);
+            choice.setChecked(method.equals(paymentMethod));
+            choices.addView(choice);
+        }
+        choices.setOnCheckedChangeListener((group, checkedId) -> {
+            View selected = group.findViewById(checkedId);
+            if (selected != null && selected.getTag() instanceof String) paymentMethod = (String) selected.getTag();
+        });
+        page.addView(choices);
+        addInlineNavigation();
+    }
+
+    private void addStripeAchPage() {
+        hideKeyboard();
+        page.addView(questionTitle("Stripe ACH bank payment"));
+        addHelp("Only the full finished amount and a private quote reference go to Stripe. No name, phone, address, drawing or other customer information is sent.");
+        String phone = customerPhone.getText().toString().trim();
+        String email = customerEmail.getText().toString().trim();
+        addHelp("Saved phone: " + (phone.isEmpty() ? "Not provided" : phone)
+                + "\nSaved email: " + (email.isEmpty() ? "Not provided" : email));
+        long currentAmount = Math.round(calculateAndDisplay(false).total * 100.0);
+        boolean linkReady = !preparedPaymentUrl.isEmpty()
+                && preparedPaymentAmountCents == currentAmount
+                && preparedPaymentImageUri != null
+                && preparedPaymentPdfUri != null;
+        if (!linkReady) {
+            Button payment = primaryButton("Create secure ACH link");
+            payment.setEnabled(jobFinished
+                    && customerSigned
+                    && paymentMethod.startsWith("ACH")
+                    && (!phone.isEmpty() || !email.isEmpty()));
+            payment.setOnClickListener(v -> confirmFinishedAndTextQuote(payment));
+            page.addView(payment);
+        } else {
+            addHelp("The secure ACH link is ready. Review each prepared message and manually tap Send.");
+            if (!phone.isEmpty()) {
+                Button textCustomer = primaryButton("Text " + phone);
+                textCustomer.setOnClickListener(v -> openFinalQuoteMessage(
+                        phone,
+                        calculateAndDisplay(false),
+                        preparedPaymentUrl,
+                        preparedPaymentImageUri));
+                page.addView(textCustomer);
+            }
+            if (!email.isEmpty()) {
+                Button emailCustomer = primaryButton("Email " + email);
+                emailCustomer.setOnClickListener(v -> openFinalQuoteEmail(
+                        email,
+                        calculateAndDisplay(false),
+                        preparedPaymentUrl,
+                        preparedPaymentPdfUri));
+                page.addView(emailCustomer);
+            }
+        }
+        if (!jobFinished) addHelp("Mark Job finished as Yes first.");
+        if (!customerSigned) addHelp("Collect the final quote signature first.");
+        if (phone.isEmpty() && email.isEmpty()) addHelp("Add a phone number or email address before creating the link.");
+        addInlineNavigation();
+    }
+
+    private void addChaseCheckPage() {
+        hideKeyboard();
+        page.addView(questionTitle("Chase check deposit"));
+        addHelp("Enter only the check number here. Write VOID on the retained check after following Chase's instructions. Never photograph or store the routing number, account number or check image in Ramsier's. Use Chase separately with a properly permissioned employee login; this app will not open the full bank account.");
+        detach(checkNumber);
+        page.addView(checkNumber);
+        addInlineNavigation();
+    }
+
+    private void addChaseCreditPage() {
+        hideKeyboard();
+        page.addView(questionTitle("Chase credit-card entry"));
+        addHelp("Do not type or photograph a card in Ramsier's. Use the separate Chase POS payment area with an employee login set to Transact only. That access accepts payments without showing bank balances or banking transactions. Debit and prepaid cards are not eligible for the 3% credit surcharge.");
+        Button setup = secondaryButton("Chase employee-access instructions");
+        setup.setOnClickListener(v -> openWebPage(
+                "https://www.chase.com/business/support/payments/quickaccept/access-and-security"));
+        page.addView(setup);
+        addInlineNavigation();
+    }
+
+    private void addPaymentStatusPage() {
+        hideKeyboard();
+        page.addView(questionTitle("Payment status"));
+        RadioGroup choices = new RadioGroup(this);
+        String[] statuses = {"Not requested", "Pending", "Paid", "Failed", "Returned"};
+        for (String status : statuses) {
+            RadioButton choice = radioButton(status, status);
+            choice.setChecked(status.equals(paymentStatus));
+            choices.addView(choice);
+        }
+        choices.setOnCheckedChangeListener((group, checkedId) -> {
+            View selected = group.findViewById(checkedId);
+            if (selected != null && selected.getTag() instanceof String) {
+                paymentStatus = (String) selected.getTag();
+                saveJobSnapshot();
+            }
+        });
+        page.addView(choices);
+        detach(paymentNotes);
+        page.addView(paymentNotes);
+        addHelp("Stripe or Chase remains the payment authority. A redirect screen alone does not prove payment.");
+        addInlineNavigation();
+    }
+
+    private void addPlumbingNoticePage() {
+        hideKeyboard();
+        page.addView(questionTitle("Customer told Ramsier's does not do plumbing?"));
+        addHelp("Ramsier's does not disconnect, reconnect or perform plumbing work. This statement is also printed on the final quote.");
+        RadioGroup choices = yesNoGroup(plumbingNoticeAcknowledged);
+        choices.setOnCheckedChangeListener((group, checkedId) -> plumbingNoticeAcknowledged = checkedYes(group, checkedId));
+        page.addView(choices);
+        addInlineNavigation();
+    }
+
+    private void addJobHistoryPage() {
+        hideKeyboard();
+        page.addView(questionTitle("Job history"));
+        addHelp("This optional page searches the same phone-local job history as Job search.");
+        detach(jobSearchInput);
+        page.addView(jobSearchInput);
+        Button search = primaryButton("Search saved jobs");
+        search.setOnClickListener(v -> showJobSearchResults(jobSearchInput.getText().toString()));
+        page.addView(search);
+        addInlineNavigation();
+    }
+
+    private void addEstimateSummary(Estimate estimate) {
+        StringBuilder itemized = new StringBuilder();
+        itemized.append("Customer: ").append(customerFullName())
+                .append("\n\nPURCHASED ITEMS\n");
+        for (QuotePdfGenerator.PriceRow row : buildQuotePriceRows(estimate)) {
+            itemized.append("\n• ").append(row.item);
+            if (!row.details.isEmpty()) itemized.append("\n  ").append(row.details);
+            itemized.append("\n  ").append(row.amount);
+        }
+        itemized.append("\n\nFULL QUOTE TOTAL: ").append(money(estimate.total))
+                .append("\n\nPlumbing: Ramsier's does not perform plumbing work");
+        TextView summary = label(itemized.toString());
+        summary.setBackgroundColor(Color.WHITE);
+        summary.setPadding(dp(12), dp(12), dp(12), dp(12));
+        page.addView(summary);
     }
 
     private void offerDrawingCrop(List<Uri> drawingUris) {
@@ -3359,6 +4303,15 @@ public class MainActivity extends Activity {
     }
 
     private void analyzeDrawing() {
+        analyzeDrawing(false, null);
+    }
+
+    private void analyzeActiveDrawing(boolean enhanced) {
+        if (activeDrawingIndex < 0 || activeDrawingIndex >= drawingPhotoUris.size()) return;
+        analyzeDrawing(enhanced, drawingPhotoUris.get(activeDrawingIndex));
+    }
+
+    private void analyzeDrawing(boolean enhanced, Uri forcedDrawingUri) {
         if (drawingPhotoUris.isEmpty()) {
             Toast.makeText(this, "Take or choose at least one countertop drawing first.", Toast.LENGTH_LONG).show();
             return;
@@ -3373,7 +4326,10 @@ public class MainActivity extends Activity {
             if (drawing != null) {
                 previousRecordsByUri.put(drawingPhotoUris.get(i).toString(), drawing);
             }
-            if (drawing == null || !drawing.hasResult() || !drawing.lastError.isEmpty()) {
+            boolean forced = forcedDrawingUri != null
+                    && forcedDrawingUri.equals(drawingPhotoUris.get(i));
+            if (forced || (forcedDrawingUri == null
+                    && (drawing == null || !drawing.hasResult() || !drawing.lastError.isEmpty()))) {
                 requestDrawingUris.add(drawingPhotoUris.get(i));
             }
         }
@@ -3381,7 +4337,8 @@ public class MainActivity extends Activity {
         final int requestRevision = drawingInputRevision;
         final int requestId = ++drawingAnalysisRequestId;
         startDrawingProgress(requestId);
-        drawingStatus.setText("AI is checking drawing 1 of " + requestDrawingUris.size() + "...");
+        drawingStatus.setText((enhanced ? "Enhanced AI" : "AI")
+                + " is checking drawing 1 of " + requestDrawingUris.size() + "...");
         showStep();
 
         new Thread(() -> {
@@ -3397,7 +4354,8 @@ public class MainActivity extends Activity {
                             requestId,
                             requestRevision,
                             drawingNumber,
-                            requestDrawingUris.size());
+                            requestDrawingUris.size(),
+                            enhanced);
                     runOnUiThread(() -> storeDrawingResult(uri, result));
                 } catch (Exception exception) {
                     if (requestId != drawingAnalysisRequestId
@@ -3425,12 +4383,13 @@ public class MainActivity extends Activity {
             int requestId,
             int requestRevision,
             int drawingNumber,
-            int drawingCount) throws Exception {
+            int drawingCount,
+            boolean enhanced) throws Exception {
         postDrawingProgress(
                 requestId,
                 5 + (int) Math.round(80.0 * (drawingNumber - 1) / drawingCount),
                 "Preparing drawing " + drawingNumber + " of " + drawingCount);
-        String image = drawingImageDataUrl(drawingUri);
+        String image = drawingImageDataUrl(drawingUri, enhanced);
         if (requestId != drawingAnalysisRequestId
                 || requestRevision != drawingInputRevision) {
             throw new IllegalStateException("Drawing analysis was canceled.");
@@ -3641,7 +4600,7 @@ public class MainActivity extends Activity {
         persistDrawingState();
     }
 
-    private String drawingImageDataUrl(Uri drawingUri) throws Exception {
+    private String drawingImageDataUrl(Uri drawingUri, boolean enhancedMode) throws Exception {
         BitmapFactory.Options bounds = new BitmapFactory.Options();
         bounds.inJustDecodeBounds = true;
         try (InputStream input = getContentResolver().openInputStream(drawingUri)) {
@@ -3684,31 +4643,37 @@ public class MainActivity extends Activity {
                     true);
         }
 
-        int uploadWidth = upload.getWidth();
-        int uploadHeight = upload.getHeight();
-        int[] enhancedPixels = new int[uploadWidth * uploadHeight];
-        upload.getPixels(
-                enhancedPixels,
-                0,
-                uploadWidth,
-                0,
-                0,
-                uploadWidth,
-                uploadHeight);
-        DrawingImageEnhancer.enhanceInPlace(enhancedPixels, uploadWidth, uploadHeight);
-        Bitmap enhanced = Bitmap.createBitmap(uploadWidth, uploadHeight, Bitmap.Config.ARGB_8888);
-        enhanced.setPixels(
-                enhancedPixels,
-                0,
-                uploadWidth,
-                0,
-                0,
-                uploadWidth,
-                uploadHeight);
-
         ByteArrayOutputStream output = new ByteArrayOutputStream();
-        enhanced.compress(Bitmap.CompressFormat.JPEG, 92, output);
-        enhanced.recycle();
+        if (enhancedMode) {
+            int uploadWidth = upload.getWidth();
+            int uploadHeight = upload.getHeight();
+            int[] enhancedPixels = new int[uploadWidth * uploadHeight];
+            upload.getPixels(
+                    enhancedPixels,
+                    0,
+                    uploadWidth,
+                    0,
+                    0,
+                    uploadWidth,
+                    uploadHeight);
+            DrawingImageEnhancer.enhanceInPlace(enhancedPixels, uploadWidth, uploadHeight);
+            Bitmap enhanced = Bitmap.createBitmap(
+                    uploadWidth,
+                    uploadHeight,
+                    Bitmap.Config.ARGB_8888);
+            enhanced.setPixels(
+                    enhancedPixels,
+                    0,
+                    uploadWidth,
+                    0,
+                    0,
+                    uploadWidth,
+                    uploadHeight);
+            enhanced.compress(Bitmap.CompressFormat.JPEG, 92, output);
+            enhanced.recycle();
+        } else {
+            upload.compress(Bitmap.CompressFormat.JPEG, 86, output);
+        }
         if (upload != original) upload.recycle();
         original.recycle();
         return "data:image/jpeg;base64,"
@@ -5127,6 +6092,43 @@ public class MainActivity extends Activity {
             return;
         }
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == PICK_CUSTOMER_JOBS_FOLDER) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                Uri treeUri = data.getData();
+                try {
+                    getContentResolver().takePersistableUriPermission(
+                            treeUri,
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                    | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+                    prefs.edit().putString(PREF_CUSTOMER_JOBS_TREE_URI, treeUri.toString()).apply();
+                    adminSessionExpiresAt = System.currentTimeMillis() + ADMIN_SESSION_MILLIS;
+                    showLiveEditScreen();
+                    Toast.makeText(this, "Shared customer folder connected.", Toast.LENGTH_LONG).show();
+                } catch (Exception exception) {
+                    Toast.makeText(this, "That folder could not be connected. Choose it again and allow access.", Toast.LENGTH_LONG).show();
+                }
+            }
+            return;
+        }
+        if (requestCode == PICK_ADMIN_PRODUCT_IMAGE) {
+            String imageKey = pendingProductImageKey;
+            pendingProductImageKey = null;
+            if (resultCode == RESULT_OK && data != null && data.getData() != null && imageKey != null) {
+                Uri imageUri = data.getData();
+                try {
+                    getContentResolver().takePersistableUriPermission(
+                            imageUri,
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    prefs.edit().putString(imageKey, imageUri.toString()).apply();
+                    adminSessionExpiresAt = System.currentTimeMillis() + ADMIN_SESSION_MILLIS;
+                    showLiveEditScreen();
+                    Toast.makeText(this, "Product picture updated.", Toast.LENGTH_SHORT).show();
+                } catch (Exception exception) {
+                    Toast.makeText(this, "That picture could not be saved.", Toast.LENGTH_LONG).show();
+                }
+            }
+            return;
+        }
         if (requestCode == PICK_IMAGE && resultCode == RESULT_OK && data != null && data.getData() != null) {
             selectedPhotoUri = data.getData();
             try {
@@ -5293,7 +6295,7 @@ public class MainActivity extends Activity {
         body.append("RAMSIER'S GRANITE AND QUARTZ\n");
         body.append("NEW COUNTERTOP QUOTE REQUEST\n\n");
         body.append("CUSTOMER\n");
-        body.append("Name: ").append(text(customerName)).append("\n");
+        body.append("Name: ").append(customerFullName()).append("\n");
         body.append("Phone: ").append(text(customerPhone)).append("\n");
         body.append("Email: ").append(text(customerEmail)).append("\n");
         body.append("Address: ").append(text(projectAddress)).append("\n\n");
@@ -5352,7 +6354,7 @@ public class MainActivity extends Activity {
         if (!to.isEmpty() && to.contains("@")) {
             email.putExtra(Intent.EXTRA_EMAIL, new String[]{to});
         }
-        email.putExtra(Intent.EXTRA_SUBJECT, "New countertop quote request - " + text(customerName));
+        email.putExtra(Intent.EXTRA_SUBJECT, "New countertop quote request - " + customerFullName());
         email.putExtra(Intent.EXTRA_TEXT, body.toString());
         if (!countertopPhotoUris.isEmpty()) {
             if (countertopPhotoUris.size() == 1) {
@@ -5387,9 +6389,17 @@ public class MainActivity extends Activity {
     }
 
     private void resetQuote() {
+        currentJobId = "job_" + UUID.randomUUID().toString().replace("-", "");
+        currentDriveFolderName = "";
         paymentLinkRequestInProgress = false;
         paymentQuoteReference = "";
         paymentQuoteAmountCents = -1;
+        preparedPaymentUrl = "";
+        preparedPaymentAmountCents = -1;
+        preparedPaymentImageUri = null;
+        preparedPaymentPdfUri = null;
+        templateAppointmentMillis = 0;
+        installationAppointmentMillis = 0;
         cancelDrawingAnalysis();
         clearAiDrawingResult();
         dismissDrawingDialogs();
@@ -5409,7 +6419,8 @@ public class MainActivity extends Activity {
         drawingInputRevision++;
         pendingCameraCapture = 0;
         for (Uri uri : removedPhotoUris) releaseUnusedPhotoUri(uri);
-        customerName.setText("");
+        customerFirstName.setText("");
+        customerLastName.setText("");
         customerPhone.setText("");
         customerEmail.setText("");
         projectAddress.setText("");
@@ -5435,10 +6446,26 @@ public class MainActivity extends Activity {
         cabinetInQuantity.setText("0");
         cabinetsApproximateDate.setText("");
         cabinetInterestComments.setText("");
+        additionalSquareFeet.setText("0");
+        finalPricePerSqFt.setText("");
+        removalSquareFeet.setText("0");
+        templateDateTime.setText("");
+        installationDateTime.setText("");
+        checkNumber.setText("");
+        paymentNotes.setText("");
+        jobSearchInput.setText("");
         cooktopCutoutYes = false;
         basketsYes = false;
         gridsYes = false;
         wantsToBuyCabinets = false;
+        countertopRemoval = false;
+        plumbingNoticeAcknowledged = false;
+        creditCardPolicyAcknowledged = false;
+        jobFinished = false;
+        customerSigned = false;
+        paymentMethod = "ACH bank account";
+        paymentStatus = "Not requested";
+        signaturePad.clear();
         edgeDetail = "Eased and polished";
         sinkSelection = "Not selected";
         equalDoubleSinkQuantity.setText("0");
@@ -5533,6 +6560,30 @@ public class MainActivity extends Activity {
             case PAGE_WATERFALL: return "Waterfall";
             case PAGE_CABINETS: return "Cabinet status";
             case PAGE_BUY_CABINETS: return "Buy cabinets";
+            case PAGE_JOB_SEARCH: return "Job search";
+            case PAGE_MANUAL_MEASUREMENT: return "Manual measurement";
+            case PAGE_COUNTERTOP_PHOTOS: return "Countertop photos";
+            case PAGE_COUNTERTOP_REMOVAL: return "Countertop removal";
+            case PAGE_REVIEW_QUOTE: return "Review quote request";
+            case PAGE_PRINT_QUOTE: return "Print or save PDF";
+            case PAGE_TEMPLATE_UPDATE: return "Template update";
+            case PAGE_FINAL_QUOTE: return "Final quote";
+            case PAGE_CUSTOMER_SIGNATURE: return "Customer signature";
+            case PAGE_SIGNED_QUOTE: return "Signed quote copy";
+            case PAGE_TEMPLATE_CALENDAR: return "TP calendar appointment";
+            case PAGE_INSTALL_CALENDAR: return "IN calendar appointment";
+            case PAGE_INSTALLATION_JOB: return "Installation job";
+            case PAGE_JOB_FINISHED: return "Job finished checklist";
+            case PAGE_CREDIT_POLICY: return "Credit card policy";
+            case PAGE_PAYMENT_METHOD: return "Payment method";
+            case PAGE_STRIPE_ACH: return "Stripe ACH";
+            case PAGE_CHASE_CHECK: return "Chase check";
+            case PAGE_CHASE_CREDIT: return "Chase credit entry";
+            case PAGE_PAYMENT_STATUS: return "Payment status";
+            case PAGE_SCHEDULE: return "Schedule";
+            case PAGE_PLUMBING_NOTICE: return "No plumbing notice";
+            case PAGE_CROP_DRAWING: return "Crop drawing";
+            case PAGE_JOB_HISTORY: return "Job history";
             case PAGE_SECTION_NAME: return "Countertop section name";
             case PAGE_SECTION_LENGTH: return "Section length";
             case PAGE_SECTION_WIDTH: return "Section width";
@@ -5661,6 +6712,8 @@ public class MainActivity extends Activity {
         applyV127PageChangesOnce();
         applyV130PageChangesOnce();
         applyV138PageChangesOnce();
+        applyV155ApprovedPageOrderOnce();
+        applyV156RequestedPageChangesOnce();
     }
 
     private void addNewPricingPagesOnce() {
@@ -5750,6 +6803,20 @@ public class MainActivity extends Activity {
         prefs.edit().putBoolean("v1_38_page_changes_applied", true).apply();
     }
 
+    private void applyV155ApprovedPageOrderOnce() {
+        if (prefs.getBoolean("v1_55_approved_page_order_applied", false)) return;
+        loadDefaultPageOrder();
+        savePageOrder();
+        prefs.edit().putBoolean("v1_55_approved_page_order_applied", true).apply();
+    }
+
+    private void applyV156RequestedPageChangesOnce() {
+        if (prefs.getBoolean("v1_56_requested_page_changes_applied", false)) return;
+        loadDefaultPageOrder();
+        savePageOrder();
+        prefs.edit().putBoolean("v1_56_requested_page_changes_applied", true).apply();
+    }
+
     private void movePageBefore(int pageId, int beforePageId) {
         pageOrder.remove(Integer.valueOf(pageId));
         int beforeIndex = pageOrder.indexOf(beforePageId);
@@ -5818,27 +6885,7 @@ public class MainActivity extends Activity {
     }
 
     private boolean isValidBuiltInPageId(int pageId) {
-        return pageId == PAGE_NAME
-                || pageId == PAGE_PHONE
-                || pageId == PAGE_EMAIL
-                || pageId == PAGE_ADDRESS
-                || pageId == PAGE_NOTES
-                || pageId == PAGE_OFFICE_EMAIL
-                || pageId == PAGE_SLABS
-                || pageId == PAGE_PRICE
-                || pageId == PAGE_SINK_CHARGE
-                || pageId == PAGE_EDGE_CHARGE
-                || pageId == PAGE_TEAR_OUT
-                || pageId == PAGE_OTHER_CHARGE
-                || pageId == PAGE_PHOTO
-                || pageId == PAGE_COOKTOP_CUTOUT
-                || pageId == PAGE_EDGE_DETAIL
-                || pageId == PAGE_FAUCET
-                || pageId == PAGE_BASKETS
-                || pageId == PAGE_GRIDS
-                || pageId == PAGE_WATERFALL
-                || pageId == PAGE_CABINETS
-                || pageId == PAGE_BUY_CABINETS
+        return (pageId >= PAGE_NAME && pageId <= PAGE_JOB_HISTORY)
                 || pageId == PAGE_SECTION_NAME
                 || pageId == PAGE_SECTION_LENGTH
                 || pageId == PAGE_SECTION_WIDTH
@@ -6227,6 +7274,519 @@ public class MainActivity extends Activity {
 
     private interface DrawingCropCallback {
         void finished(Uri resultUri);
+    }
+
+    private void openCalendarInsert(String title, int color, long startMillis) {
+        if (startMillis <= 0) {
+            Toast.makeText(this, "Choose the appointment date and time first.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        Intent calendar = new Intent(Intent.ACTION_INSERT, CalendarContract.Events.CONTENT_URI);
+        calendar.putExtra(CalendarContract.Events.TITLE, title);
+        calendar.putExtra(CalendarContract.Events.EVENT_LOCATION, text(projectAddress));
+        calendar.putExtra(CalendarContract.Events.DESCRIPTION,
+                "Ramsier's Granite & Quartz — " + customerFullName());
+        calendar.putExtra(CalendarContract.Events.EVENT_COLOR, color);
+        calendar.putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, startMillis);
+        calendar.putExtra(CalendarContract.EXTRA_EVENT_END_TIME, startMillis + 60 * 60 * 1000L);
+        try {
+            startActivity(Intent.createChooser(calendar, "Review and save calendar appointment"));
+        } catch (Exception exception) {
+            Toast.makeText(this, "A calendar app could not be opened.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private boolean hasCustomerJobsFolder() {
+        return !prefs.getString(PREF_CUSTOMER_JOBS_TREE_URI, "").trim().isEmpty();
+    }
+
+    private Uri customerJobsTreeUri() {
+        String saved = prefs.getString(PREF_CUSTOMER_JOBS_TREE_URI, "").trim();
+        return saved.isEmpty() ? null : Uri.parse(saved);
+    }
+
+    private String connectedCustomerJobsFolderMessage() {
+        Uri treeUri = customerJobsTreeUri();
+        if (treeUri == null) {
+            return "Shared Drive is not connected on this phone. An owner uses Admin settings once to choose the private Ramsiers Customer Jobs folder.";
+        }
+        try {
+            return "Connected to: " + DriveJobStore.rootName(this, treeUri)
+                    + ". Only Google accounts the owner shares that folder with can see these jobs.";
+        } catch (Exception ignored) {
+            return "A shared folder was selected, but it may need to be connected again.";
+        }
+    }
+
+    private void openCustomerJobsFolderPicker() {
+        if (!requireActiveAdminSession()) return;
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+                | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
+        startActivityForResult(intent, PICK_CUSTOMER_JOBS_FOLDER);
+    }
+
+    private void saveCurrentJobToDrive() {
+        if (driveOperationInProgress) {
+            Toast.makeText(this, "Drive is already working. Please wait.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Uri treeUri = customerJobsTreeUri();
+        if (treeUri == null) {
+            Toast.makeText(this, "Ask the owner to connect the shared folder in Admin settings first.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (isBlank(customerFirstName) || isBlank(customerLastName)) {
+            Toast.makeText(this, "Enter the customer's first and last name before saving to Drive.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        final JSONObject job;
+        try {
+            job = buildDriveJobJson();
+        } catch (Exception exception) {
+            Toast.makeText(this, "The current job could not be prepared for Drive.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (currentDriveFolderName.isEmpty()) currentDriveFolderName = customerDriveFolderName();
+        String folderName = currentDriveFolderName;
+        ArrayList<Uri> drawings = new ArrayList<>(drawingPhotoUris);
+        ArrayList<Uri> photos = new ArrayList<>(countertopPhotoUris);
+        Uri signedQuote = preparedPaymentPdfUri;
+        driveOperationInProgress = true;
+        Toast.makeText(this, "Saving the customer folder to Drive…", Toast.LENGTH_LONG).show();
+        new Thread(() -> {
+            try {
+                DriveJobStore.save(
+                        getApplicationContext(), treeUri, folderName, job, drawings, photos, signedQuote);
+                runOnUiThread(() -> {
+                    driveOperationInProgress = false;
+                    saveJobSnapshot();
+                    Toast.makeText(this, "Customer folder saved to shared Drive.", Toast.LENGTH_LONG).show();
+                });
+            } catch (Exception exception) {
+                runOnUiThread(() -> {
+                    driveOperationInProgress = false;
+                    Toast.makeText(this, safeDriveError(exception), Toast.LENGTH_LONG).show();
+                });
+            }
+        }, "customer-drive-save").start();
+    }
+
+    private void showDriveJobSearchResults(String query) {
+        if (driveOperationInProgress) {
+            Toast.makeText(this, "Drive is already working. Please wait.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Uri treeUri = customerJobsTreeUri();
+        if (treeUri == null) {
+            Toast.makeText(this, "Ask the owner to connect the shared folder in Admin settings first.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        driveOperationInProgress = true;
+        Toast.makeText(this, "Checking shared customer jobs…", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            try {
+                ArrayList<DriveJobStore.JobEntry> entries = DriveJobStore.list(
+                        getApplicationContext(), treeUri, query);
+                runOnUiThread(() -> showDriveJobChoices(entries));
+            } catch (Exception exception) {
+                runOnUiThread(() -> {
+                    driveOperationInProgress = false;
+                    Toast.makeText(this, safeDriveError(exception), Toast.LENGTH_LONG).show();
+                });
+            }
+        }, "customer-drive-list").start();
+    }
+
+    private void showDriveJobChoices(ArrayList<DriveJobStore.JobEntry> entries) {
+        driveOperationInProgress = false;
+        if (entries.isEmpty()) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Shared Drive jobs")
+                    .setMessage("No shared jobs match that search.")
+                    .setPositiveButton("Close", null)
+                    .show();
+            return;
+        }
+        String[] labels = new String[entries.size()];
+        for (int i = 0; i < entries.size(); i++) {
+            JSONObject job = entries.get(i).data;
+            labels[i] = job.optString("name", "Customer")
+                    + "\n" + job.optString("address", "")
+                    + "\n" + job.optString("status", "Not requested")
+                    + " — " + job.optString("total", "$0.00");
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Tap a job to open it")
+                .setItems(labels, (dialog, which) -> restoreDriveJob(entries.get(which)))
+                .setNegativeButton("Close", null)
+                .show();
+    }
+
+    private String safeDriveError(Exception exception) {
+        String message = exception.getMessage();
+        if (message == null || message.trim().isEmpty()) message = "Google Drive could not be reached.";
+        return message + " No on-phone job was deleted.";
+    }
+
+    private String customerDriveFolderName() {
+        String last = customerLastName.getText().toString().trim();
+        String first = customerFirstName.getText().toString().trim();
+        String address = projectAddress.getText().toString().trim();
+        String street = address.isEmpty() ? "No address" : address.split(",")[0].trim();
+        String suffix = currentJobId.length() > 8
+                ? currentJobId.substring(currentJobId.length() - 8)
+                : currentJobId;
+        return safeDriveName(last + ", " + first + " - " + street + " - " + suffix);
+    }
+
+    private String safeDriveName(String value) {
+        String safe = value.replaceAll("[\\\\/:*?\"<>|]", "-").replaceAll("\\s+", " ").trim();
+        return safe.length() > 100 ? safe.substring(0, 100).trim() : safe;
+    }
+
+    private JSONObject buildDriveJobJson() throws Exception {
+        syncActiveDrawingRecord();
+        Estimate estimate = calculateAndDisplay(false);
+        JSONObject job = new JSONObject();
+        job.put("schema", 1);
+        job.put("id", currentJobId);
+        job.put("name", customerFullName());
+        job.put("address", projectAddress.getText().toString().trim());
+        job.put("status", paymentStatus);
+        job.put("total", money(estimate.total));
+        job.put("driveFolderName", currentDriveFolderName);
+
+        JSONObject inputs = new JSONObject();
+        putDriveText(inputs, "firstName", customerFirstName);
+        putDriveText(inputs, "lastName", customerLastName);
+        putDriveText(inputs, "phone", customerPhone);
+        putDriveText(inputs, "email", customerEmail);
+        putDriveText(inputs, "address", projectAddress);
+        putDriveText(inputs, "notes", projectNotes);
+        putDriveText(inputs, "stoveLength", stoveLength);
+        putDriveText(inputs, "stoveWidth", stoveWidth);
+        putDriveText(inputs, "pricePerSqFt", pricePerSqFt);
+        putDriveText(inputs, "sinkCharge", sinkCharge);
+        putDriveText(inputs, "edgeCharge", edgeCharge);
+        putDriveText(inputs, "tearOutCharge", tearOutCharge);
+        putDriveText(inputs, "otherCharge", otherCharge);
+        putDriveText(inputs, "cooktopCutoutQuantity", cooktopCutoutQuantity);
+        putDriveText(inputs, "edgeLinearFeet", edgeLinearFeet);
+        putDriveText(inputs, "faucetQuantity", faucetQuantity);
+        putDriveText(inputs, "cabinetInQuantity", cabinetInQuantity);
+        putDriveText(inputs, "equalDoubleSinkQuantity", equalDoubleSinkQuantity);
+        putDriveText(inputs, "offsetDoubleSinkQuantity", offsetDoubleSinkQuantity);
+        putDriveText(inputs, "singleBowlSinkQuantity", singleBowlSinkQuantity);
+        putDriveText(inputs, "whiteRectangleVanitySinkQuantity", whiteRectangleVanitySinkQuantity);
+        putDriveText(inputs, "biscuitRectangleVanitySinkQuantity", biscuitRectangleVanitySinkQuantity);
+        putDriveText(inputs, "rectangleVanitySinkLocations", rectangleVanitySinkLocations);
+        putDriveText(inputs, "whiteOvalVanitySinkQuantity", whiteOvalVanitySinkQuantity);
+        putDriveText(inputs, "biscuitOvalVanitySinkQuantity", biscuitOvalVanitySinkQuantity);
+        putDriveText(inputs, "ovalVanitySinkLocations", ovalVanitySinkLocations);
+        putDriveText(inputs, "anotherSinkQuantity", anotherSinkQuantity);
+        putDriveText(inputs, "undecidedSinkQuantity", undecidedSinkQuantity);
+        putDriveText(inputs, "basketQuantity", basketQuantity);
+        putDriveText(inputs, "gridQuantity", gridQuantity);
+        putDriveText(inputs, "waterfallQuantity", waterfallQuantity);
+        putDriveText(inputs, "waterfallComments", waterfallComments);
+        putDriveText(inputs, "cabinetsApproximateDate", cabinetsApproximateDate);
+        putDriveText(inputs, "cabinetInterestComments", cabinetInterestComments);
+        putDriveText(inputs, "additionalSquareFeet", additionalSquareFeet);
+        putDriveText(inputs, "finalPricePerSqFt", finalPricePerSqFt);
+        putDriveText(inputs, "removalSquareFeet", removalSquareFeet);
+        putDriveText(inputs, "templateDateTime", templateDateTime);
+        putDriveText(inputs, "installationDateTime", installationDateTime);
+        job.put("inputs", inputs);
+
+        JSONObject choices = new JSONObject();
+        choices.put("cooktopCutoutYes", cooktopCutoutYes);
+        choices.put("basketsYes", basketsYes);
+        choices.put("gridsYes", gridsYes);
+        choices.put("wantsToBuyCabinets", wantsToBuyCabinets);
+        choices.put("countertopRemoval", countertopRemoval);
+        choices.put("plumbingNoticeAcknowledged", plumbingNoticeAcknowledged);
+        choices.put("creditCardPolicyAcknowledged", creditCardPolicyAcknowledged);
+        choices.put("jobFinished", jobFinished);
+        choices.put("customerSigned", customerSigned);
+        choices.put("paymentMethod", paymentMethod);
+        choices.put("paymentStatus", paymentStatus);
+        choices.put("edgeDetail", edgeDetail);
+        choices.put("sinkSelection", sinkSelection);
+        choices.put("templateAppointmentMillis", templateAppointmentMillis);
+        choices.put("installationAppointmentMillis", installationAppointmentMillis);
+        job.put("choices", choices);
+
+        JSONArray savedSlabs = new JSONArray();
+        for (SlabSelection slab : slabs) {
+            savedSlabs.put(new JSONObject().put("name", slab.name).put("raw", slab.raw));
+        }
+        job.put("slabs", savedSlabs);
+        JSONArray savedSections = new JSONArray();
+        for (CounterSection section : sections) {
+            savedSections.put(new JSONObject()
+                    .put("name", section.name)
+                    .put("length", section.length)
+                    .put("width", section.width)
+                    .put("quantity", section.quantity));
+        }
+        job.put("sections", savedSections);
+
+        JSONArray savedDrawings = new JSONArray();
+        for (DrawingRecord drawing : drawingRecords) {
+            JSONObject saved = new JSONObject();
+            saved.put("resultRevision", drawing.resultRevision);
+            saved.put("analyzed", drawing.analyzed);
+            saved.put("squareFeet", drawing.squareFeet);
+            saved.put("canCalculate", drawing.canCalculate);
+            saved.put("editedByUser", drawing.editedByUser);
+            saved.put("confidence", drawing.confidence);
+            saved.put("explanation", drawing.explanation);
+            saved.put("missingInformation", drawing.missingInformation);
+            saved.put("lastError", drawing.lastError);
+            if (drawing.calculationParts != null) saved.put("calculationParts", drawing.calculationParts);
+            if (drawing.verificationDrawing != null) saved.put("verificationDrawing", drawing.verificationDrawing);
+            savedDrawings.put(saved);
+        }
+        job.put("drawings", savedDrawings);
+
+        JSONObject customAnswers = new JSONObject();
+        for (Integer id : customInputs.keySet()) {
+            EditText input = customInputs.get(id);
+            if (input != null) customAnswers.put(String.valueOf(id), input.getText().toString());
+        }
+        job.put("customAnswers", customAnswers);
+        return job;
+    }
+
+    private void putDriveText(JSONObject object, String key, EditText input) throws Exception {
+        object.put(key, input.getText().toString());
+    }
+
+    private void restoreDriveJob(DriveJobStore.JobEntry entry) {
+        try {
+            JSONObject job = entry.data;
+            JSONObject inputs = job.optJSONObject("inputs");
+            if (inputs == null) throw new IllegalStateException("This job backup is incomplete.");
+            currentJobId = job.optString("id", "job_" + UUID.randomUUID().toString().replace("-", ""));
+            currentDriveFolderName = entry.folderName;
+            restoreDriveText(inputs, "firstName", customerFirstName);
+            restoreDriveText(inputs, "lastName", customerLastName);
+            restoreDriveText(inputs, "phone", customerPhone);
+            restoreDriveText(inputs, "email", customerEmail);
+            restoreDriveText(inputs, "address", projectAddress);
+            restoreDriveText(inputs, "notes", projectNotes);
+            restoreDriveText(inputs, "stoveLength", stoveLength);
+            restoreDriveText(inputs, "stoveWidth", stoveWidth);
+            restoreDriveText(inputs, "pricePerSqFt", pricePerSqFt);
+            restoreDriveText(inputs, "sinkCharge", sinkCharge);
+            restoreDriveText(inputs, "edgeCharge", edgeCharge);
+            restoreDriveText(inputs, "tearOutCharge", tearOutCharge);
+            restoreDriveText(inputs, "otherCharge", otherCharge);
+            restoreDriveText(inputs, "cooktopCutoutQuantity", cooktopCutoutQuantity);
+            restoreDriveText(inputs, "edgeLinearFeet", edgeLinearFeet);
+            restoreDriveText(inputs, "faucetQuantity", faucetQuantity);
+            restoreDriveText(inputs, "cabinetInQuantity", cabinetInQuantity);
+            restoreDriveText(inputs, "equalDoubleSinkQuantity", equalDoubleSinkQuantity);
+            restoreDriveText(inputs, "offsetDoubleSinkQuantity", offsetDoubleSinkQuantity);
+            restoreDriveText(inputs, "singleBowlSinkQuantity", singleBowlSinkQuantity);
+            restoreDriveText(inputs, "whiteRectangleVanitySinkQuantity", whiteRectangleVanitySinkQuantity);
+            restoreDriveText(inputs, "biscuitRectangleVanitySinkQuantity", biscuitRectangleVanitySinkQuantity);
+            restoreDriveText(inputs, "rectangleVanitySinkLocations", rectangleVanitySinkLocations);
+            restoreDriveText(inputs, "whiteOvalVanitySinkQuantity", whiteOvalVanitySinkQuantity);
+            restoreDriveText(inputs, "biscuitOvalVanitySinkQuantity", biscuitOvalVanitySinkQuantity);
+            restoreDriveText(inputs, "ovalVanitySinkLocations", ovalVanitySinkLocations);
+            restoreDriveText(inputs, "anotherSinkQuantity", anotherSinkQuantity);
+            restoreDriveText(inputs, "undecidedSinkQuantity", undecidedSinkQuantity);
+            restoreDriveText(inputs, "basketQuantity", basketQuantity);
+            restoreDriveText(inputs, "gridQuantity", gridQuantity);
+            restoreDriveText(inputs, "waterfallQuantity", waterfallQuantity);
+            restoreDriveText(inputs, "waterfallComments", waterfallComments);
+            restoreDriveText(inputs, "cabinetsApproximateDate", cabinetsApproximateDate);
+            restoreDriveText(inputs, "cabinetInterestComments", cabinetInterestComments);
+            restoreDriveText(inputs, "additionalSquareFeet", additionalSquareFeet);
+            restoreDriveText(inputs, "finalPricePerSqFt", finalPricePerSqFt);
+            restoreDriveText(inputs, "removalSquareFeet", removalSquareFeet);
+            restoreDriveText(inputs, "templateDateTime", templateDateTime);
+            restoreDriveText(inputs, "installationDateTime", installationDateTime);
+
+            JSONObject choices = job.optJSONObject("choices");
+            if (choices == null) choices = new JSONObject();
+            cooktopCutoutYes = choices.optBoolean("cooktopCutoutYes");
+            basketsYes = choices.optBoolean("basketsYes");
+            gridsYes = choices.optBoolean("gridsYes");
+            wantsToBuyCabinets = choices.optBoolean("wantsToBuyCabinets");
+            countertopRemoval = choices.optBoolean("countertopRemoval");
+            plumbingNoticeAcknowledged = choices.optBoolean("plumbingNoticeAcknowledged");
+            creditCardPolicyAcknowledged = choices.optBoolean("creditCardPolicyAcknowledged");
+            jobFinished = choices.optBoolean("jobFinished");
+            customerSigned = choices.optBoolean("customerSigned");
+            paymentMethod = choices.optString("paymentMethod", "ACH bank account");
+            paymentStatus = choices.optString("paymentStatus", "Not requested");
+            edgeDetail = choices.optString("edgeDetail", "Eased and polished");
+            sinkSelection = choices.optString("sinkSelection", "Not selected");
+            templateAppointmentMillis = choices.optLong("templateAppointmentMillis", 0);
+            installationAppointmentMillis = choices.optLong("installationAppointmentMillis", 0);
+
+            slabs.clear();
+            JSONArray savedSlabs = job.optJSONArray("slabs");
+            if (savedSlabs != null) for (int i = 0; i < savedSlabs.length(); i++) {
+                JSONObject slab = savedSlabs.optJSONObject(i);
+                if (slab != null) slabs.add(new SlabSelection(slab.optString("name"), slab.optString("raw")));
+            }
+            sections.clear();
+            JSONArray savedSections = job.optJSONArray("sections");
+            if (savedSections != null) for (int i = 0; i < savedSections.length(); i++) {
+                JSONObject section = savedSections.optJSONObject(i);
+                if (section != null) sections.add(new CounterSection(
+                        section.optString("name"),
+                        section.optDouble("length"),
+                        section.optDouble("width"),
+                        section.optDouble("quantity", 1)));
+            }
+
+            countertopPhotoUris.clear();
+            countertopPhotoUris.addAll(entry.countertopPhotoUris);
+            selectedPhotoUri = countertopPhotoUris.isEmpty() ? null : countertopPhotoUris.get(0);
+            drawingPhotoUris.clear();
+            drawingPhotoUris.addAll(entry.drawingUris);
+            drawingRecords.clear();
+            JSONArray savedDrawings = job.optJSONArray("drawings");
+            for (int i = 0; i < drawingPhotoUris.size(); i++) {
+                JSONObject drawing = savedDrawings == null ? null : savedDrawings.optJSONObject(i);
+                if (drawing == null) {
+                    drawingRecords.add(DrawingRecord.empty(drawingPhotoUris.get(i).toString()));
+                } else {
+                    drawingRecords.add(new DrawingRecord(
+                            drawingPhotoUris.get(i).toString(),
+                            drawing.optInt("resultRevision", -1),
+                            drawing.optBoolean("analyzed"),
+                            drawing.optDouble("squareFeet"),
+                            drawing.optBoolean("canCalculate"),
+                            drawing.optBoolean("editedByUser"),
+                            drawing.optString("confidence"),
+                            drawing.optString("explanation"),
+                            drawing.optString("missingInformation"),
+                            drawing.optString("lastError"),
+                            drawing.optJSONArray("calculationParts"),
+                            drawing.optJSONObject("verificationDrawing")));
+                }
+            }
+            activeDrawingIndex = 0;
+            loadActiveDrawingResult(false);
+            preparedPaymentPdfUri = entry.signedQuoteUri;
+            preparedPaymentImageUri = null;
+            preparedPaymentUrl = "";
+            preparedPaymentAmountCents = -1;
+            checkNumber.setText("");
+            paymentNotes.setText("");
+            signaturePad.clear();
+
+            JSONObject customAnswers = job.optJSONObject("customAnswers");
+            if (customAnswers != null) for (Integer id : customInputs.keySet()) {
+                EditText input = customInputs.get(id);
+                if (input != null) input.setText(customAnswers.optString(String.valueOf(id), ""));
+            }
+            saveLists();
+            persistDrawingState();
+            saveJobSnapshot();
+            int nameStep = pageOrder.indexOf(PAGE_NAME);
+            stepIndex = nameStep < 0 ? 0 : nameStep;
+            showStep();
+            Toast.makeText(this, "Shared job opened. Review it before making changes.", Toast.LENGTH_LONG).show();
+        } catch (Exception exception) {
+            Toast.makeText(this, safeDriveError(exception), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void restoreDriveText(JSONObject object, String key, EditText input) {
+        input.setText(object.optString(key, ""));
+    }
+
+    private void showJobSearchResults(String query) {
+        String needle = query == null ? "" : query.trim().toLowerCase(Locale.US);
+        ArrayList<String> matches = new ArrayList<>();
+        try {
+            JSONArray jobs = new JSONArray(prefs.getString("job_history_v1", "[]"));
+            for (int i = jobs.length() - 1; i >= 0; i--) {
+                JSONObject job = jobs.getJSONObject(i);
+                if (!needle.isEmpty() && !job.toString().toLowerCase(Locale.US).contains(needle)) continue;
+                matches.add(job.optString("name", "Customer")
+                        + "\n" + job.optString("address", "")
+                        + "\n" + job.optString("status", "Not requested")
+                        + " — " + job.optString("total", "$0.00"));
+            }
+        } catch (Exception ignored) {
+        }
+        String message = matches.isEmpty()
+                ? "No saved jobs match that search."
+                : android.text.TextUtils.join("\n\n", matches);
+        new AlertDialog.Builder(this)
+                .setTitle(needle.isEmpty() ? "Saved jobs" : "Search results")
+                .setMessage(message)
+                .setPositiveButton("Close", null)
+                .show();
+    }
+
+    private void saveJobSnapshot() {
+        if (isBlank(customerFirstName) || isBlank(customerLastName)) return;
+        try {
+            JSONArray jobs = new JSONArray(prefs.getString("job_history_v1", "[]"));
+            JSONObject job = new JSONObject();
+            String id = currentJobId;
+            job.put("id", id);
+            job.put("firstName", customerFirstName.getText().toString().trim());
+            job.put("lastName", customerLastName.getText().toString().trim());
+            job.put("name", customerFullName());
+            job.put("phone", customerPhone.getText().toString().trim());
+            job.put("email", customerEmail.getText().toString().trim());
+            job.put("address", projectAddress.getText().toString().trim());
+            job.put("notes", projectNotes.getText().toString().trim());
+            job.put("slabs", printableSelectedSlabs());
+            job.put("status", paymentStatus);
+            job.put("paymentMethod", paymentMethod);
+            job.put("checkNumber", checkNumber.getText().toString().trim());
+            job.put("paymentNotes", paymentNotes.getText().toString().trim());
+            job.put("total", money(calculateAndDisplay(false).total));
+            job.put("template", templateDateTime.getText().toString().trim());
+            job.put("installation", installationDateTime.getText().toString().trim());
+            job.put("driveFolderName", currentDriveFolderName);
+            int existing = -1;
+            for (int i = 0; i < jobs.length(); i++) {
+                if (id.equals(jobs.getJSONObject(i).optString("id"))) {
+                    existing = i;
+                    break;
+                }
+            }
+            if (existing >= 0) jobs.put(existing, job); else jobs.put(job);
+            prefs.edit().putString("job_history_v1", jobs.toString()).apply();
+        } catch (Exception ignored) {
+        }
+    }
+
+    private double effectivePricePerSquareFoot() {
+        return JobWorkflow.effectivePrice(value(pricePerSqFt), value(finalPricePerSqFt));
+    }
+
+    private double removalCharge() {
+        return JobWorkflow.removalCharge(countertopRemoval, value(removalSquareFeet));
+    }
+
+    private String customerFullName() {
+        String first = customerFirstName.getText().toString().trim();
+        String last = customerLastName.getText().toString().trim();
+        String full = (first + " " + last).trim();
+        return full.isEmpty() ? "Not provided" : full;
+    }
+
+    private String calendarJobName() {
+        String first = customerFirstName.getText().toString().trim();
+        String last = customerLastName.getText().toString().trim();
+        String initial = first.isEmpty() ? "" : first.substring(0, 1).toUpperCase(Locale.US) + " ";
+        String result = (initial + last).trim();
+        return result.isEmpty() ? "Customer" : result;
     }
 
     private static class DrawingCropPreviewView extends View {
@@ -7249,6 +8809,76 @@ public class MainActivity extends Activity {
             this.id = id;
             this.title = title == null || title.trim().isEmpty() ? "Custom question" : title;
             this.question = question == null || question.trim().isEmpty() ? this.title : question;
+        }
+    }
+
+    private static class SignaturePad extends View {
+        private final Paint ink = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint border = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Path signature = new Path();
+        private boolean hasInk;
+
+        SignaturePad(Context context) {
+            super(context);
+            setBackgroundColor(Color.WHITE);
+            setContentDescription("Customer signature box");
+            ink.setColor(Color.BLACK);
+            ink.setStyle(Paint.Style.STROKE);
+            ink.setStrokeWidth(6f);
+            ink.setStrokeCap(Paint.Cap.ROUND);
+            ink.setStrokeJoin(Paint.Join.ROUND);
+            border.setColor(Color.rgb(91, 58, 41));
+            border.setStyle(Paint.Style.STROKE);
+            border.setStrokeWidth(3f);
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            canvas.drawRect(2, 2, getWidth() - 2, getHeight() - 2, border);
+            canvas.drawPath(signature, ink);
+        }
+
+        @Override
+        public boolean onTouchEvent(MotionEvent event) {
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    signature.moveTo(event.getX(), event.getY());
+                    hasInk = true;
+                    getParent().requestDisallowInterceptTouchEvent(true);
+                    invalidate();
+                    return true;
+                case MotionEvent.ACTION_MOVE:
+                    signature.lineTo(event.getX(), event.getY());
+                    invalidate();
+                    return true;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    getParent().requestDisallowInterceptTouchEvent(false);
+                    invalidate();
+                    return true;
+                default:
+                    return super.onTouchEvent(event);
+            }
+        }
+
+        boolean hasInk() {
+            return hasInk;
+        }
+
+        void clear() {
+            signature.reset();
+            hasInk = false;
+            invalidate();
+        }
+
+        Bitmap toBitmap() {
+            int width = Math.max(1, getWidth());
+            int height = Math.max(1, getHeight());
+            Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+            Canvas canvas = new Canvas(bitmap);
+            draw(canvas);
+            return bitmap;
         }
     }
 
