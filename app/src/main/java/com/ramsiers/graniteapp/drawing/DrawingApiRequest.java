@@ -18,6 +18,10 @@ public final class DrawingApiRequest {
             request.put("rectangle_decomposition_required", true);
             request.put("use_dotted_lines_as_partition_guides", true);
             request.put("calculate_each_rectangle_separately", true);
+            request.put("four_burner_circles_mean_stove", true);
+            request.put("default_unmarked_stove_width_inches", 30);
+            request.put("explicit_stove_dimension_overrides_default", true);
+            request.put("return_undimensioned_countertop_shapes_for_user_editing", true);
         } catch (Exception ignored) {
         }
         return request;

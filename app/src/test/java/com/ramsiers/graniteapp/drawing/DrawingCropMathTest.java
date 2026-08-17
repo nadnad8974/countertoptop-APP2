@@ -14,10 +14,31 @@ public class DrawingCropMathTest {
     }
 
     @Test
-    public void trimsEachEdgeWithoutChangingTheOriginal() {
+    public void keepsTheWholeEdgeWhenTrimIsWithinTheSafetyMargin() {
         assertArrayEquals(
-                new int[]{120, 160, 840, 520},
+                new int[]{0, 0, 1200, 800},
+                DrawingCropMath.bounds(1200, 800, 3, 3, 3, 3));
+    }
+
+    @Test
+    public void trimsEachEdgeButKeepsTheSafetyMargin() {
+        assertArrayEquals(
+                new int[]{84, 136, 912, 568},
                 DrawingCropMath.bounds(1200, 800, 10, 20, 20, 15));
+    }
+
+    @Test
+    public void beginsTrimmingAfterTheSafetyMargin() {
+        assertArrayEquals(
+                new int[]{12, 0, 1188, 800},
+                DrawingCropMath.bounds(1200, 800, 4, 0, 0, 0));
+    }
+
+    @Test
+    public void roundsOutwardToProtectPartialEdgePixels() {
+        assertArrayEquals(
+                new int[]{1, 0, 99, 99},
+                DrawingCropMath.bounds(101, 99, 4, 4, 4, 4));
     }
 
     @Test

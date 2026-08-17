@@ -21,5 +21,9 @@ public class DrawingApiRequestTest {
         assertTrue(request.getBoolean("rectangle_decomposition_required"));
         assertTrue(request.getBoolean("use_dotted_lines_as_partition_guides"));
         assertTrue(request.getBoolean("calculate_each_rectangle_separately"));
+        assertTrue(request.getBoolean("four_burner_circles_mean_stove"));
+        assertEquals(30, request.getInt("default_unmarked_stove_width_inches"));
+        assertTrue(request.getBoolean("explicit_stove_dimension_overrides_default"));
+        assertTrue(request.getBoolean("return_undimensioned_countertop_shapes_for_user_editing"));
     }
 }

@@ -110,6 +110,7 @@ public class DrawingStateTest {
     private static DrawingState stateWithTwoDrawings() throws Exception {
         JSONArray parts = new JSONArray().put(new JSONObject()
                 .put("id", "counter")
+                .put("link_id", "counter")
                 .put("operation", "add")
                 .put("length_inches", 72)
                 .put("width_inches", 40));
@@ -118,12 +119,23 @@ public class DrawingStateTest {
                 new JSONArray().put(new JSONObject()
                         .put("kind", "countertop")
                         .put("user_label", "Island")));
+        JSONObject linkedRedraw = new JSONObject().put(
+                "shapes",
+                new JSONArray().put(new JSONObject()
+                        .put("id", "counter")
+                        .put("link_id", "counter")
+                        .put("kind", "countertop")
+                        .put("points", new JSONArray()
+                                .put(new JSONObject().put("x", 10).put("y", 10))
+                                .put(new JSONObject().put("x", 200).put("y", 10))
+                                .put(new JSONObject().put("x", 200).put("y", 100))
+                                .put(new JSONObject().put("x", 10).put("y", 100)))));
         DrawingRecord first = record(
                 "content://drawing/one",
                 20,
                 false,
                 parts,
-                new JSONObject().put("shapes", new JSONArray()));
+                linkedRedraw);
         DrawingRecord second = record(
                 "content://drawing/two",
                 36.64,

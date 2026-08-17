@@ -74,6 +74,9 @@ public final class DrawingRecord {
             int resultRevision,
             JSONObject response) {
         JSONObject safeResponse = response == null ? new JSONObject() : response;
+        DrawingStoveDefaults.apply(
+                safeResponse.optJSONArray("calculation_parts"),
+                safeResponse.optJSONObject("verification_drawing"));
         JSONArray parts = DrawingRules.sanitizeCalculationParts(
                 safeResponse.optJSONArray("calculation_parts"));
         JSONObject drawing = DrawingRules.sanitizeServerDrawing(
@@ -93,7 +96,19 @@ public final class DrawingRecord {
             missingInformation = appendMessage(
                     missingInformation,
                     "The area formula could not be verified. Review or add the missing piece in the editor.");
-        } else if (canCalculate
+        } else if (canCalculate && !missingInformation.trim().isEmpty()) {
+            canCalculate = false;
+        } else if (canCalculate) {
+            DrawingMeasurementGuard.Result measurementGuard =
+                    DrawingMeasurementGuard.inspect(drawing, parts);
+            if (!measurementGuard.canPrice) {
+                canCalculate = false;
+                missingInformation = appendMessage(
+                        missingInformation,
+                        measurementGuard.question);
+            }
+        }
+        if (canCalculate
                 && Math.abs(verifiedSquareFeet - serverSquareFeet) > 0.009) {
             explanation = "Verified piece total: "
                     + String.format(Locale.US, "%.2f", verifiedSquareFeet)
@@ -165,7 +180,7 @@ public final class DrawingRecord {
         if (source == null) return null;
         String uri = source.optString("uri", "").trim();
         if (uri.isEmpty()) return null;
-        return new DrawingRecord(
+        DrawingRecord restored = new DrawingRecord(
                 uri,
                 source.optInt("result_revision", -1),
                 source.optBoolean("analyzed", false),
@@ -178,6 +193,56 @@ public final class DrawingRecord {
                 source.optString("last_error", ""),
                 source.optJSONArray("calculation_parts"),
                 source.optJSONObject("verification_drawing"));
+        return guardRestoredAiResult(restored);
+    }
+
+    /** Restores one Drive job drawing while rechecking only unedited AI measurements. */
+    public static DrawingRecord fromSavedJob(String uri, JSONObject source) {
+        if (source == null) return empty(uri);
+        DrawingRecord restored = new DrawingRecord(
+                uri,
+                source.optInt("resultRevision", -1),
+                source.optBoolean("analyzed", false),
+                source.optDouble("squareFeet", 0),
+                source.optBoolean("canCalculate", false),
+                source.optBoolean("editedByUser", false),
+                source.optString("confidence", ""),
+                source.optString("explanation", ""),
+                source.optString("missingInformation", ""),
+                source.optString("lastError", ""),
+                source.optJSONArray("calculationParts"),
+                source.optJSONObject("verificationDrawing"));
+        return guardRestoredAiResult(restored);
+    }
+
+    private static DrawingRecord guardRestoredAiResult(DrawingRecord restored) {
+        if (restored == null
+                || !restored.analyzed
+                || restored.editedByUser
+                || !restored.canCalculate) return restored;
+        String missingInformation = restored.missingInformation;
+        DrawingMeasurementGuard.Result measurementGuard = DrawingMeasurementGuard.inspect(
+                restored.verificationDrawing,
+                restored.calculationParts);
+        if (missingInformation.trim().isEmpty() && measurementGuard.canPrice) return restored;
+        if (missingInformation.trim().isEmpty()) {
+            missingInformation = appendMessage(
+                    missingInformation,
+                    measurementGuard.question);
+        }
+        return new DrawingRecord(
+                restored.uri,
+                restored.resultRevision,
+                restored.analyzed,
+                0,
+                false,
+                false,
+                restored.confidence,
+                restored.explanation,
+                missingInformation,
+                restored.lastError,
+                restored.calculationParts,
+                restored.verificationDrawing);
     }
 
     private static JSONArray copyArray(JSONArray value) {

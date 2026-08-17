@@ -16,6 +16,21 @@ public final class DrawingFallback {
     private DrawingFallback() {
     }
 
+    /** Starts a safe empty canvas when the service can describe a photo but cannot redraw it. */
+    public static JSONObject blankEditable() {
+        try {
+            return new JSONObject()
+                    .put("canvas_width", CANVAS_WIDTH)
+                    .put("canvas_height", CANVAS_HEIGHT)
+                    .put("units", "inches")
+                    .put("partial_user_edit", true)
+                    .put("shapes", new JSONArray())
+                    .put("dimensions", new JSONArray());
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
     public static boolean hasDrawableShape(JSONObject drawing) {
         if (drawing == null) return false;
         JSONArray shapes = drawing.optJSONArray("shapes");
