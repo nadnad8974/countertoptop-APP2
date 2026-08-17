@@ -1,0 +1,185 @@
+{
+  "schema_version": 3,
+  "units": "inches",
+  "can_calculate": true,
+  "confidence": "medium",
+  "explanation": "Three explicitly dimensioned area pieces were identified.",
+  "warnings": [],
+  "missing_measurements": [],
+  "parts": [
+    {
+      "id": "wall_run",
+      "feature_type": "countertop",
+      "operation": "add",
+      "length_inches": 100,
+      "width_inches": 25.5,
+      "quantity": 1,
+      "confidence": "high",
+      "measurement_source": "explicit"
+    },
+    {
+      "id": "island",
+      "feature_type": "countertop",
+      "operation": "add",
+      "length_inches": 102,
+      "width_inches": 45,
+      "quantity": 1,
+      "confidence": "high",
+      "measurement_source": "explicit"
+    },
+    {
+      "id": "stove_opening",
+      "feature_type": "stove",
+      "operation": "subtract",
+      "length_inches": 30,
+      "width_inches": 25.5,
+      "quantity": 1,
+      "confidence": "medium",
+      "measurement_source": "default"
+    },
+    {
+      "id": "sink_opening",
+      "feature_type": "sink",
+      "operation": "ignore",
+      "length_inches": null,
+      "width_inches": null,
+      "quantity": 1,
+      "confidence": "medium",
+      "measurement_source": "missing"
+    }
+  ],
+  "drawing": {
+    "canvas_width": 1000,
+    "canvas_height": 700,
+    "shapes": [
+      {
+        "id": "wall_run",
+        "link_id": "wall_run",
+        "feature_type": "countertop",
+        "kind": "countertop",
+        "opening_type": "none",
+        "burner_count": null,
+        "points": [
+          { "x": 80, "y": 80 },
+          { "x": 620, "y": 80 },
+          { "x": 620, "y": 220 },
+          { "x": 80, "y": 220 }
+        ]
+      },
+      {
+        "id": "island",
+        "link_id": "island",
+        "feature_type": "countertop",
+        "kind": "countertop",
+        "opening_type": "none",
+        "burner_count": null,
+        "points": [
+          { "x": 250, "y": 420 },
+          { "x": 720, "y": 420 },
+          { "x": 720, "y": 620 },
+          { "x": 250, "y": 620 }
+        ]
+      },
+      {
+        "id": "stove_opening",
+        "link_id": "stove_opening",
+        "feature_type": "stove",
+        "kind": "opening",
+        "opening_type": "stove",
+        "burner_count": 4,
+        "points": [
+          { "x": 320, "y": 80 },
+          { "x": 430, "y": 80 },
+          { "x": 430, "y": 220 },
+          { "x": 320, "y": 220 }
+        ]
+      },
+      {
+        "id": "sink_opening",
+        "link_id": "sink_opening",
+        "feature_type": "sink",
+        "kind": "opening",
+        "opening_type": "sink",
+        "burner_count": null,
+        "points": [
+          { "x": 430, "y": 455 },
+          { "x": 540, "y": 455 },
+          { "x": 540, "y": 550 },
+          { "x": 430, "y": 550 }
+        ]
+      }
+    ],
+    "dimensions": [
+      {
+        "part_id": "wall_run",
+        "role": "length",
+        "value_inches": 100,
+        "label": "100 inches",
+        "source_text": "100\"",
+        "source_kind": "measurement",
+        "placement": "outside_shape",
+        "x1": 80,
+        "y1": 55,
+        "x2": 620,
+        "y2": 55,
+        "confidence": "high"
+      },
+      {
+        "part_id": "island",
+        "role": "width",
+        "value_inches": 45,
+        "label": "45 inches",
+        "source_text": "45",
+        "source_kind": "measurement",
+        "placement": "outside_shape",
+        "x1": 740,
+        "y1": 420,
+        "x2": 740,
+        "y2": 620,
+        "confidence": "high"
+      },
+      {
+        "part_id": "wall_run",
+        "role": "width",
+        "value_inches": 25.5,
+        "label": "25 1/2 inches",
+        "source_text": "25 1/2",
+        "source_kind": "measurement",
+        "placement": "outside_shape",
+        "x1": 55,
+        "y1": 80,
+        "x2": 55,
+        "y2": 220,
+        "confidence": "high"
+      },
+      {
+        "part_id": "island",
+        "role": "length",
+        "value_inches": 102,
+        "label": "102 inches",
+        "source_text": "102",
+        "source_kind": "measurement",
+        "placement": "outside_shape",
+        "x1": 250,
+        "y1": 395,
+        "x2": 720,
+        "y2": 395,
+        "confidence": "high"
+      },
+      {
+        "part_id": "stove_opening",
+        "role": "width",
+        "value_inches": 25.5,
+        "label": "25 1/2 inches",
+        "source_text": "25 1/2",
+        "source_kind": "measurement",
+        "placement": "on_dimension_line",
+        "x1": 305,
+        "y1": 80,
+        "x2": 305,
+        "y2": 220,
+        "confidence": "medium"
+      }
+    ]
+  }
+}

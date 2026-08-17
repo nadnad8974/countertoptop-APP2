@@ -2,7 +2,9 @@ package com.ramsiers.graniteapp;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.DatePickerDialog;
 import android.app.Dialog;
+import android.app.TimePickerDialog;
 import android.Manifest;
 import android.content.ClipData;
 import android.content.Context;
@@ -14,6 +16,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
@@ -28,6 +31,8 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.provider.MediaStore;
+import android.provider.CalendarContract;
+import android.print.PrintManager;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.TextWatcher;
@@ -39,11 +44,15 @@ import android.view.ScaleGestureDetector;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
+import android.view.ViewConfiguration;
+import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.ArrayAdapter;
+import android.widget.AdapterView;
 import android.widget.AutoCompleteTextView;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
@@ -52,30 +61,71 @@ import android.widget.ProgressBar;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
 import android.widget.ScrollView;
+import android.widget.SeekBar;
+import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.core.content.FileProvider;
+import androidx.exifinterface.media.ExifInterface;
 
 import com.google.zxing.BarcodeFormat;
 import com.google.zxing.integration.android.IntentIntegrator;
 import com.google.zxing.integration.android.IntentResult;
+import com.ramsiers.graniteapp.drawing.DrawingAnalysisFailurePolicy;
+import com.ramsiers.graniteapp.drawing.DrawingApiRequest;
+import com.ramsiers.graniteapp.drawing.DrawingCropMath;
+import com.ramsiers.graniteapp.drawing.DrawingCropSourcePolicy;
+import com.ramsiers.graniteapp.drawing.DrawingDragGesture;
+import com.ramsiers.graniteapp.drawing.DrawingFallback;
+import com.ramsiers.graniteapp.drawing.DrawingImageEnhancer;
+import com.ramsiers.graniteapp.drawing.DrawingMath;
+import com.ramsiers.graniteapp.drawing.DrawingMissingMeasurementPolicy;
+import com.ramsiers.graniteapp.drawing.DrawingPieceSummary;
+import com.ramsiers.graniteapp.drawing.DrawingProgressText;
+import com.ramsiers.graniteapp.drawing.DrawingRecord;
+import com.ramsiers.graniteapp.drawing.DrawingRectangleFactory;
+import com.ramsiers.graniteapp.drawing.DrawingRetryPolicy;
+import com.ramsiers.graniteapp.drawing.DrawingRules;
+import com.ramsiers.graniteapp.drawing.DrawingShapeGeometry;
+import com.ramsiers.graniteapp.drawing.DrawingShapeMeasurementEditor;
+import com.ramsiers.graniteapp.drawing.DrawingState;
+import com.ramsiers.graniteapp.drawing.QuoteSquareFootMath;
+import com.ramsiers.graniteapp.drawing.auth.DrawingDeviceCredential;
+import com.ramsiers.graniteapp.drawing.auth.DrawingDeviceCredentialStore;
+import com.ramsiers.graniteapp.drawing.auth.DrawingEndpointAuthPolicy;
+import com.ramsiers.graniteapp.drawing.auth.DrawingEnrollmentParser;
+import com.ramsiers.graniteapp.payment.PaymentLinkClient;
+import com.ramsiers.graniteapp.print.PdfFilePrintAdapter;
+import com.ramsiers.graniteapp.print.QuotePdfGenerator;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.text.DecimalFormat;
+import java.text.SimpleDateFormat;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
+import java.net.SocketTimeoutException;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.SecureRandom;
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.UUID;
+import java.util.Date;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+import javax.crypto.SecretKeyFactory;
+import javax.crypto.spec.PBEKeySpec;
 
 public class MainActivity extends Activity {
     private static final int PICK_IMAGE = 901;
@@ -83,19 +133,53 @@ public class MainActivity extends Activity {
     private static final int PICK_DRAWING_IMAGE = 903;
     private static final int CAMERA_PERMISSION = 904;
     private static final int TAKE_COUNTERTOP_PHOTO = 905;
+    private static final int PICK_ADMIN_PRODUCT_IMAGE = 906;
+    private static final int PICK_CUSTOMER_JOBS_FOLDER = 907;
+    private static final int QR_SCAN_SLAB_REQUEST = 908;
+    private static final int QR_SCAN_DRAWING_ENROLLMENT_REQUEST = 909;
     private static final int CAMERA_CAPTURE_COUNTERTOP = 1;
     private static final int CAMERA_CAPTURE_DRAWING = 2;
+    private static final int QR_SCAN_NONE = 0;
+    private static final int QR_SCAN_SLAB = 1;
+    private static final int QR_SCAN_DRAWING_ENROLLMENT = 2;
+    private static final int MAX_DRAWING_PHOTOS = 6;
+    private static final String STATE_DRAWING_URIS = "drawing_uris";
+    private static final String STATE_ACTIVE_DRAWING_INDEX = "active_drawing_index";
+    private static final String STATE_PENDING_DRAWING_URI = "pending_drawing_uri";
+    private static final String STATE_DRAWING_INPUT_REVISION = "drawing_input_revision";
+    private static final String STATE_PENDING_CAMERA_CAPTURE = "pending_camera_capture";
+    private static final String STATE_PENDING_QR_SCAN_PURPOSE = "pending_qr_scan_purpose";
+    private static final String STATE_STEP_INDEX = "step_index";
+    private static final String STATE_DRAWING_JSON = "drawing_state_json";
     private static final String PREFS = "ramsiers_granite_app";
-    private static final String MSI_VISUALIZER = "https://www.roomvo.com/my/msi/?product_type=1&multi_product_visualizer=5";
+    private static final String PREF_DRAWING_STATE = "drawing_state_v1";
+    private static final String PREF_CUSTOMER_JOBS_TREE_URI = "customer_jobs_tree_uri_v1";
     private static final String DRAWING_AI_ENDPOINT =
-            "https://ramsiers-drawing-ai.nadnad8974.chatgpt.site/api/analyze";
+            "https://ramsiers-drawing-ai-service.vercel.app/api/analyze";
+    private static final String DRAWING_AI_NOT_CONNECTED_ERROR =
+            "Drawing AI is not connected on this phone. Ask the owner to connect it in Admin settings.";
+    private static final String DRAWING_AI_INVALID_CONNECTION_ERROR =
+            "This phone's Drawing AI connection is not valid. Ask the owner to reconnect it in Admin settings.";
+    private static final int DRAWING_HTTP_DEADLINE_MILLIS =
+            DrawingAnalysisFailurePolicy.requestDeadlineMillis(90000);
+    private static final String PAYMENT_LINK_ENDPOINT =
+            "https://ramsiers-payment-service.vercel.app/api/create-payment-link";
     private static final String PRICE_CUTOUT = "price_cutout";
     private static final String PRICE_EDGE = "price_edge";
     private static final String PRICE_FAUCET = "price_faucet";
     private static final String PRICE_BASKET = "price_basket";
     private static final String PRICE_GRID = "price_grid";
-    private static final String DEFAULT_PAGE_ORDER = "0,1,2,3,12,8,13,15,16,17,20,14,18,19,11,6,4";
-    private static final String ALL_BUILT_IN_PAGES = "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,100,101,102,103,104,105,106";
+    private static final String ADMIN_PIN_SALT = "admin_pin_salt_v1";
+    private static final String ADMIN_PIN_HASH = "admin_pin_hash_v1";
+    private static final String ADMIN_PIN_LOCK_UNTIL = "admin_pin_lock_until_v1";
+    private static final String ADMIN_PIN_FAILURES = "admin_pin_failures_v1";
+    private static final int ADMIN_PIN_ITERATIONS = 120000;
+    private static final long ADMIN_SESSION_MILLIS = 5 * 60 * 1000L;
+    // Temporarily false so blank customer names can advance during app testing.
+    private static final boolean REQUIRE_CUSTOMER_NAME_BEFORE_NEXT = false;
+    private static final double WATERFALL_PRICE = 300.0;
+    private static final String DEFAULT_PAGE_ORDER = JobWorkflow.APPROVED_PAGE_ORDER;
+    private static final String ALL_BUILT_IN_PAGES = "0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,42,44,100,101,102,103,104,105,106";
     private static final int CUSTOM_PAGE_START = 1000;
     private static final int PAGE_NAME = 0;
     private static final int PAGE_PHONE = 1;
@@ -118,6 +202,30 @@ public class MainActivity extends Activity {
     private static final int PAGE_CABINETS = 18;
     private static final int PAGE_BUY_CABINETS = 19;
     private static final int PAGE_WATERFALL = 20;
+    private static final int PAGE_JOB_SEARCH = 21;
+    private static final int PAGE_MANUAL_MEASUREMENT = 22;
+    private static final int PAGE_COUNTERTOP_PHOTOS = 23;
+    private static final int PAGE_COUNTERTOP_REMOVAL = 24;
+    private static final int PAGE_REVIEW_QUOTE = 25;
+    private static final int PAGE_PRINT_QUOTE = 26;
+    private static final int PAGE_TEMPLATE_UPDATE = 27;
+    private static final int PAGE_FINAL_QUOTE = 28;
+    private static final int PAGE_CUSTOMER_SIGNATURE = 29;
+    private static final int PAGE_SIGNED_QUOTE = 30;
+    private static final int PAGE_TEMPLATE_CALENDAR = 31;
+    private static final int PAGE_INSTALL_CALENDAR = 32;
+    private static final int PAGE_INSTALLATION_JOB = 33;
+    private static final int PAGE_JOB_FINISHED = 34;
+    private static final int PAGE_CREDIT_POLICY = 35;
+    private static final int PAGE_PAYMENT_METHOD = 36;
+    private static final int PAGE_STRIPE_ACH = 37;
+    private static final int PAGE_CHASE_CHECK = 38;
+    private static final int PAGE_CHASE_CREDIT = 39;
+    private static final int PAGE_PAYMENT_STATUS = 40;
+    private static final int PAGE_SCHEDULE = 41;
+    private static final int PAGE_PLUMBING_NOTICE = 42;
+    private static final int PAGE_CROP_DRAWING = 43;
+    private static final int PAGE_JOB_HISTORY = 44;
     private static final int PAGE_SECTION_NAME = 100;
     private static final int PAGE_SECTION_LENGTH = 101;
     private static final int PAGE_SECTION_WIDTH = 102;
@@ -129,12 +237,15 @@ public class MainActivity extends Activity {
     private final ArrayList<SlabSelection> slabs = new ArrayList<>();
     private final ArrayList<CounterSection> sections = new ArrayList<>();
     private final ArrayList<Uri> countertopPhotoUris = new ArrayList<>();
+    private final ArrayList<Uri> drawingPhotoUris = new ArrayList<>();
+    private final ArrayList<DrawingRecord> drawingRecords = new ArrayList<>();
     private final ArrayList<Integer> pageOrder = new ArrayList<>();
     private final ArrayList<CustomPage> customPages = new ArrayList<>();
     private final HashMap<Integer, EditText> customInputs = new HashMap<>();
     private final DecimalFormat number = new DecimalFormat("0.00");
 
     private SharedPreferences prefs;
+    private DrawingDeviceCredentialStore drawingDeviceCredentialStore;
     private ScrollView scroll;
     private LinearLayout page;
     private LinearLayout navigation;
@@ -142,7 +253,8 @@ public class MainActivity extends Activity {
     private LinearLayout sectionList;
     private LinearLayout manualMeasurementList;
 
-    private EditText customerName;
+    private EditText customerFirstName;
+    private EditText customerLastName;
     private EditText customerPhone;
     private EditText customerEmail;
     private EditText projectAddress;
@@ -180,17 +292,48 @@ public class MainActivity extends Activity {
     private EditText waterfallComments;
     private EditText cabinetsApproximateDate;
     private EditText cabinetInterestComments;
+    private EditText additionalSquareFeet;
+    private EditText finalPricePerSqFt;
+    private EditText removalSquareFeet;
+    private EditText templateDateTime;
+    private EditText installationDateTime;
+    private EditText checkNumber;
+    private EditText paymentNotes;
+    private EditText jobSearchInput;
 
     private boolean cooktopCutoutYes;
     private boolean basketsYes;
     private boolean gridsYes;
     private boolean wantsToBuyCabinets;
+    private boolean countertopRemoval;
+    private boolean plumbingNoticeAcknowledged;
+    private boolean creditCardPolicyAcknowledged;
+    private boolean jobFinished;
+    private boolean customerSigned;
+    private String paymentMethod = "ACH bank account";
+    private String paymentStatus = "Not requested";
+    private boolean paymentLinkRequestInProgress;
+    private String paymentQuoteReference = "";
+    private long paymentQuoteAmountCents = -1;
+    private String preparedPaymentUrl = "";
+    private long preparedPaymentAmountCents = -1;
+    private Uri preparedPaymentImageUri;
+    private Uri preparedPaymentPdfUri;
+    private long templateAppointmentMillis;
+    private long installationAppointmentMillis;
+    private long adminSessionExpiresAt;
+    private String currentJobId = "job_" + UUID.randomUUID().toString().replace("-", "");
+    private String currentDriveFolderName = "";
+    private boolean driveOperationInProgress;
+    private boolean savedJobsMenuOpen;
+    private String pendingProductImageKey;
     private String edgeDetail = "Eased and polished";
     private String sinkSelection = "Not selected";
     private double aiDrawingSquareFeet;
     private String aiDrawingConfidence = "";
     private String aiDrawingExplanation = "";
     private String aiDrawingMissingInformation = "";
+    private String aiDrawingLastError = "";
     private boolean aiDrawingCanCalculate;
     private boolean aiDrawingEditedByUser;
     private JSONObject aiVerificationDrawing;
@@ -199,6 +342,8 @@ public class MainActivity extends Activity {
     private volatile int drawingAnalysisRequestId;
     private long drawingAnalysisStartedAt;
     private int drawingProgressFloor;
+    private boolean activityResumed;
+    private int pendingTimeoutRecoveryRevision = -1;
 
     private TextView squareFootResult;
     private TextView totalResult;
@@ -211,16 +356,20 @@ public class MainActivity extends Activity {
     private ImageView drawingPhoto;
     private ProgressBar drawingProgressBar;
     private VerificationDrawingView verificationDrawingView;
-    private Button analyzeDrawingButton;
     private EditText pendingManualLength;
     private EditText pendingManualWidth;
     private Uri selectedPhotoUri;
-    private Uri drawingPhotoUri;
+    private Uri pendingDrawingCaptureUri;
+    private Uri displayedDrawingPreviewUri;
     private int stepIndex = 0;
     private int photoAccordionOpen = 0;
+    private int activeDrawingIndex;
+    private int drawingInputRevision;
+    private int aiResultRevision = -1;
     private boolean renderingManualMeasurements;
     private boolean manualPendingCommitted;
     private int pendingCameraCapture = 0;
+    private int pendingQrScanPurpose = QR_SCAN_NONE;
     private final Handler addressHandler = new Handler(Looper.getMainLooper());
     private final Handler drawingProgressHandler = new Handler(Looper.getMainLooper());
     private Runnable addressLookupRunnable;
@@ -229,15 +378,231 @@ public class MainActivity extends Activity {
     private HttpURLConnection activeDrawingConnection;
     private Dialog drawingZoomDialog;
     private Dialog drawingEditDialog;
+    private SignaturePad signaturePad;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        drawingDeviceCredentialStore = new DrawingDeviceCredentialStore(this);
         loadSavedLists();
         loadCustomPages();
         loadPageOrder();
+        restoreDrawingState(savedInstanceState);
         buildUi();
+        if (!drawingPhotoUris.isEmpty()) {
+            if (hasActiveDrawingResult()) {
+                updateDrawingStatusText();
+            } else {
+                drawingStatus.setText(drawingPhotoUris.size() + " drawing"
+                        + (drawingPhotoUris.size() == 1 ? " is" : "s are")
+                        + " ready. New drawings are analyzed automatically.");
+            }
+        }
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        String drawingStateJson = currentDrawingState().toJson();
+        outState.putString(STATE_DRAWING_JSON, drawingStateJson);
+        prefs.edit().putString(PREF_DRAWING_STATE, drawingStateJson).apply();
+        ArrayList<String> drawingUriStrings = new ArrayList<>();
+        for (Uri uri : drawingPhotoUris) {
+            if (uri != null) drawingUriStrings.add(uri.toString());
+        }
+        outState.putStringArrayList(STATE_DRAWING_URIS, drawingUriStrings);
+        outState.putInt(STATE_ACTIVE_DRAWING_INDEX, activeDrawingIndex);
+        outState.putString(
+                STATE_PENDING_DRAWING_URI,
+                pendingDrawingCaptureUri == null
+                        ? null
+                        : pendingDrawingCaptureUri.toString());
+        outState.putInt(STATE_DRAWING_INPUT_REVISION, drawingInputRevision);
+        outState.putInt(STATE_PENDING_CAMERA_CAPTURE, pendingCameraCapture);
+        outState.putInt(STATE_PENDING_QR_SCAN_PURPOSE, pendingQrScanPurpose);
+        outState.putInt(STATE_STEP_INDEX, stepIndex);
+        super.onSaveInstanceState(outState);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        activityResumed = true;
+        maybeOpenPendingTimeoutRecovery();
+    }
+
+    @Override
+    protected void onPause() {
+        activityResumed = false;
+        super.onPause();
+    }
+
+    private void restoreDrawingState(Bundle state) {
+        DrawingState restored = DrawingState.fromJson(
+                state != null && state.containsKey(STATE_DRAWING_JSON)
+                        ? state.getString(STATE_DRAWING_JSON)
+                        : prefs.getString(PREF_DRAWING_STATE, ""));
+        drawingPhotoUris.clear();
+        drawingRecords.clear();
+        for (DrawingRecord drawing : restored.drawings) {
+            Uri uri = Uri.parse(drawing.uri);
+            if (!drawingPhotoUris.contains(uri)) drawingPhotoUris.add(uri);
+            if (drawingRecords.size() < drawingPhotoUris.size()) drawingRecords.add(drawing);
+        }
+        activeDrawingIndex = restored.activeDrawingIndex;
+        drawingInputRevision = restored.inputRevision;
+        loadActiveDrawingResult(false);
+
+        if (state == null) {
+            pendingDrawingCaptureUri = null;
+            pendingCameraCapture = 0;
+            pendingQrScanPurpose = QR_SCAN_NONE;
+            stepIndex = 0;
+            displayedDrawingPreviewUri = null;
+            return;
+        }
+        String pendingUri = state.getString(STATE_PENDING_DRAWING_URI);
+        pendingDrawingCaptureUri = pendingUri == null || pendingUri.isEmpty()
+                ? null
+                : Uri.parse(pendingUri);
+        int savedCaptureType = state.getInt(STATE_PENDING_CAMERA_CAPTURE, 0);
+        pendingCameraCapture = savedCaptureType == CAMERA_CAPTURE_DRAWING
+                || savedCaptureType == CAMERA_CAPTURE_COUNTERTOP
+                ? savedCaptureType
+                : 0;
+        int savedQrScanPurpose = state.getInt(STATE_PENDING_QR_SCAN_PURPOSE, QR_SCAN_NONE);
+        pendingQrScanPurpose = savedQrScanPurpose == QR_SCAN_SLAB
+                || savedQrScanPurpose == QR_SCAN_DRAWING_ENROLLMENT
+                ? savedQrScanPurpose
+                : QR_SCAN_NONE;
+        stepIndex = Math.max(
+                0,
+                Math.min(state.getInt(STATE_STEP_INDEX, 0), pageOrder.size()));
+        displayedDrawingPreviewUri = null;
+    }
+
+    private DrawingState currentDrawingState() {
+        syncActiveDrawingRecord();
+        return new DrawingState(
+                new ArrayList<>(drawingRecords),
+                activeDrawingIndex,
+                drawingInputRevision);
+    }
+
+    private void persistDrawingState() {
+        if (prefs == null) return;
+        prefs.edit().putString(PREF_DRAWING_STATE, currentDrawingState().toJson()).apply();
+    }
+
+    private void clearActiveDrawingFields() {
+        aiResultRevision = -1;
+        aiDrawingSquareFeet = 0;
+        aiDrawingCanCalculate = false;
+        aiDrawingEditedByUser = false;
+        aiDrawingConfidence = "";
+        aiDrawingExplanation = "";
+        aiDrawingMissingInformation = "";
+        aiDrawingLastError = "";
+        aiDrawingCalculationParts = null;
+        aiVerificationDrawing = null;
+    }
+
+    private void loadActiveDrawingResult(boolean updateView) {
+        clearActiveDrawingFields();
+        DrawingRecord drawing = activeDrawingRecord();
+        if (drawing != null) aiDrawingLastError = drawing.lastError;
+        if (drawing != null && drawing.hasResult()) {
+            aiResultRevision = drawing.resultRevision;
+            aiDrawingSquareFeet = drawing.squareFeet;
+            aiDrawingCanCalculate = drawing.canCalculate;
+            aiDrawingEditedByUser = drawing.editedByUser;
+            aiDrawingConfidence = drawing.confidence;
+            aiDrawingExplanation = drawing.explanation;
+            aiDrawingMissingInformation = drawing.missingInformation;
+            aiDrawingLastError = drawing.lastError;
+            aiDrawingCalculationParts = drawing.calculationParts;
+            aiVerificationDrawing = drawing.verificationDrawing;
+        }
+        if (!updateView || verificationDrawingView == null) return;
+        if (aiVerificationDrawing == null) {
+            verificationDrawingView.clearDrawing();
+            verificationDrawingView.setVisibility(View.GONE);
+        } else {
+            verificationDrawingView.setVerificationDrawing(aiVerificationDrawing);
+            verificationDrawingView.setCalculationParts(aiDrawingCalculationParts);
+        }
+    }
+
+    private void syncActiveDrawingRecord() {
+        if (drawingRecords.size() != drawingPhotoUris.size()
+                || activeDrawingIndex < 0
+                || activeDrawingIndex >= drawingRecords.size()) return;
+        Uri uri = drawingPhotoUris.get(activeDrawingIndex);
+        if (uri == null) return;
+        drawingRecords.set(
+                activeDrawingIndex,
+                new DrawingRecord(
+                        uri.toString(),
+                        aiResultRevision,
+                        aiResultRevision >= 0,
+                        aiDrawingSquareFeet,
+                        aiDrawingCanCalculate,
+                        aiDrawingEditedByUser,
+                        aiDrawingConfidence,
+                        aiDrawingExplanation,
+                        aiDrawingMissingInformation,
+                        aiDrawingLastError,
+                        aiDrawingCalculationParts,
+                        aiVerificationDrawing));
+    }
+
+    private DrawingRecord activeDrawingRecord() {
+        if (activeDrawingIndex < 0 || activeDrawingIndex >= drawingRecords.size()) return null;
+        return drawingRecords.get(activeDrawingIndex);
+    }
+
+    private boolean hasActiveDrawingResult() {
+        DrawingRecord drawing = activeDrawingRecord();
+        return drawing != null && drawing.hasResult();
+    }
+
+    private int analyzedDrawingCount() {
+        int count = 0;
+        for (DrawingRecord drawing : drawingRecords) {
+            if (drawing.hasResult()) count++;
+        }
+        return count;
+    }
+
+    private boolean hasCompleteAiDrawingEstimate() {
+        if (drawingRecords.isEmpty()) return false;
+        for (DrawingRecord drawing : drawingRecords) {
+            if (!drawing.hasResult() || !drawing.canCalculate) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private int usableDrawingCount() {
+        int count = 0;
+        for (DrawingRecord drawing : drawingRecords) {
+            if (drawing.hasResult() && drawing.canCalculate) count++;
+        }
+        return count;
+    }
+
+    private double calculatedDrawingSubtotal() {
+        double total = 0;
+        for (DrawingRecord drawing : drawingRecords) {
+            if (drawing.hasResult() && drawing.canCalculate) total += drawing.squareFeet;
+        }
+        return Math.round(total * 100.0) / 100.0;
+    }
+
+    private double combinedAiDrawingSquareFeet() {
+        if (!hasCompleteAiDrawingEstimate()) return 0;
+        return calculatedDrawingSubtotal();
     }
 
     @Override
@@ -267,6 +632,17 @@ public class MainActivity extends Activity {
         super.onDestroy();
     }
 
+    @Override
+    protected void onStop() {
+        persistDrawingState();
+        saveJobSnapshot();
+        if (pendingProductImageKey == null
+                && pendingQrScanPurpose != QR_SCAN_DRAWING_ENROLLMENT) {
+            adminSessionExpiresAt = 0;
+        }
+        super.onStop();
+    }
+
     private void buildUi() {
         LinearLayout screen = new LinearLayout(this);
         screen.setOrientation(LinearLayout.VERTICAL);
@@ -293,7 +669,8 @@ public class MainActivity extends Activity {
         screen.addView(navigation, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        customerName = input("Type the customer's full name", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+        customerFirstName = input("Customer's first name", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+        customerLastName = input("Customer's last name", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
         customerPhone = input("Type the customer's phone number", InputType.TYPE_CLASS_PHONE);
         customerEmail = input("Type the customer's email", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
         projectAddress = addressInput("Type the project address");
@@ -332,7 +709,7 @@ public class MainActivity extends Activity {
         edgeLinearFeet = input("How many linear feet receive this edge?", decimalInput());
         edgeLinearFeet.setText("0");
         faucetQuantity = quantityInput("How many RAMSIER'S faucets?");
-        cabinetInQuantity = quantityInput("How many cabinet areas are in?");
+        cabinetInQuantity = quantityInput("Are the cabinets in?");
         equalDoubleSinkQuantity = quantityInput("How many equal double-bowl kitchen sinks?");
         offsetDoubleSinkQuantity = quantityInput("How many offset double-bowl kitchen sinks?");
         singleBowlSinkQuantity = quantityInput("How many single-bowl kitchen sinks?");
@@ -352,6 +729,17 @@ public class MainActivity extends Activity {
         waterfallComments = input("Waterfall comments, if needed", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         cabinetsApproximateDate = input("Approximate cabinet date or notes", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         cabinetInterestComments = input("Cabinet comments, if needed", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        additionalSquareFeet = input("Additional square feet found during template", decimalInput());
+        additionalSquareFeet.setText("0");
+        finalPricePerSqFt = input("Final installed price per square foot", decimalInput());
+        removalSquareFeet = input("Square feet to remove at $10 per square foot", decimalInput());
+        removalSquareFeet.setText("0");
+        templateDateTime = input("Template date and time", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        installationDateTime = input("Installation date and time", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        checkNumber = input("Check number only — never routing or account number", InputType.TYPE_CLASS_NUMBER);
+        paymentNotes = input("Payment notes (no bank or card numbers)", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        jobSearchInput = input("Search first name, last name, phone, address, material, or notes", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+        signaturePad = new SignaturePad(this);
 
         squareFootResult = resultLabel("Net square footage: 0.00");
         totalResult = resultLabel("Estimated total: $0.00");
@@ -396,24 +784,50 @@ public class MainActivity extends Activity {
         navigation.removeAllViews();
 
         addBrandHeader();
-        TextView progress = label("Question " + (stepIndex + 1) + " of " + totalSteps());
+        TextView progress = label(stepIndex >= pageOrder.size()
+                ? "Workflow complete"
+                : "Question " + (stepIndex + 1) + " of " + totalSteps());
         progress.setGravity(Gravity.CENTER);
         progress.setTextColor(Color.GRAY);
         page.addView(progress);
 
         if (stepIndex >= pageOrder.size()) {
-            addReviewStep();
+            addWorkflowCompleteStep();
         } else {
             showQuestionPage(pageOrder.get(stepIndex));
         }
 
-        scroll.post(() -> scroll.smoothScrollTo(0, 0));
+        scroll.post(() -> {
+            scroll.smoothScrollTo(0, 0);
+            maybeOpenPendingTimeoutRecovery();
+        });
+    }
+
+    private void maybeOpenPendingTimeoutRecovery() {
+        if (pendingTimeoutRecoveryRevision < 0) return;
+        if (pendingTimeoutRecoveryRevision != drawingInputRevision) {
+            pendingTimeoutRecoveryRevision = -1;
+            return;
+        }
+        if (!DrawingAnalysisFailurePolicy.shouldOpenTimeoutRecovery(
+                pendingTimeoutRecoveryRevision,
+                drawingInputRevision,
+                activityResumed,
+                currentPageId() == PAGE_PHOTO,
+                isFinishing(),
+                drawingEditDialog != null)) return;
+        int revision = pendingTimeoutRecoveryRevision;
+        pendingTimeoutRecoveryRevision = -1;
+        openEditableDrawingAfterTimeout(revision);
     }
 
     private void showQuestionPage(int pageId) {
         switch (pageId) {
+            case PAGE_JOB_SEARCH:
+                addJobSearchStep();
+                break;
             case PAGE_NAME:
-                addQuestion(questionText(pageId, "What is the customer's name?"), customerName, true);
+                addCustomerNameStep();
                 break;
             case PAGE_PHONE:
                 addQuestion(questionText(pageId, "What is the customer's phone number?"), customerPhone, true);
@@ -475,6 +889,69 @@ public class MainActivity extends Activity {
                 break;
             case PAGE_PHOTO:
                 addPhotoStep();
+                break;
+            case PAGE_MANUAL_MEASUREMENT:
+                addManualMeasurementStep();
+                break;
+            case PAGE_COUNTERTOP_PHOTOS:
+                addCountertopPhotosStep();
+                break;
+            case PAGE_COUNTERTOP_REMOVAL:
+                addCountertopRemovalStep();
+                break;
+            case PAGE_REVIEW_QUOTE:
+                addQuoteReviewPage();
+                break;
+            case PAGE_PRINT_QUOTE:
+                addPrintQuotePage();
+                break;
+            case PAGE_TEMPLATE_UPDATE:
+                addTemplateUpdatePage();
+                break;
+            case PAGE_FINAL_QUOTE:
+                addFinalQuotePage();
+                break;
+            case PAGE_CUSTOMER_SIGNATURE:
+                addCustomerSignaturePage();
+                break;
+            case PAGE_SIGNED_QUOTE:
+                addSignedQuotePage();
+                break;
+            case PAGE_TEMPLATE_CALENDAR:
+                addCalendarPage(true);
+                break;
+            case PAGE_INSTALL_CALENDAR:
+                addCalendarPage(false);
+                break;
+            case PAGE_INSTALLATION_JOB:
+                addInstallationJobPage();
+                break;
+            case PAGE_JOB_FINISHED:
+                addJobFinishedPage();
+                break;
+            case PAGE_CREDIT_POLICY:
+                addCreditPolicyPage();
+                break;
+            case PAGE_PAYMENT_METHOD:
+                addPaymentMethodPage();
+                break;
+            case PAGE_STRIPE_ACH:
+                addStripeAchPage();
+                break;
+            case PAGE_CHASE_CHECK:
+                addChaseCheckPage();
+                break;
+            case PAGE_CHASE_CREDIT:
+                addChaseCreditPage();
+                break;
+            case PAGE_PAYMENT_STATUS:
+                addPaymentStatusPage();
+                break;
+            case PAGE_PLUMBING_NOTICE:
+                addPlumbingNoticePage();
+                break;
+            case PAGE_JOB_HISTORY:
+                addJobHistoryPage();
                 break;
             case PAGE_SECTION_NAME:
                 addQuestion(questionText(pageId, "What should this countertop section be called?"), sectionName, true);
@@ -674,7 +1151,9 @@ public class MainActivity extends Activity {
 
     private void addEdgeDetailStep() {
         hideKeyboard();
+        if ("Bevel".equals(edgeDetail)) edgeDetail = "Big bevel";
         page.addView(questionTitle(questionForEdit(PAGE_EDGE_DETAIL)));
+        addProductImage(R.drawable.edge_details, "Countertop edge detail choices");
         double edgePrice = priceValue(PRICE_EDGE, 10);
         addHelp(edgeName("eased", "Eased and polished") + " is free. Every other edge is "
                 + money(edgePrice) + " per linear foot.");
@@ -685,7 +1164,6 @@ public class MainActivity extends Activity {
                 "Eased and polished",
                 "Small round",
                 "Big round",
-                "Bevel",
                 "Big bevel"
         };
         for (String edgeValue : values) {
@@ -711,6 +1189,7 @@ public class MainActivity extends Activity {
     private void addFaucetStep() {
         hideKeyboard();
         page.addView(questionTitle(questionForEdit(PAGE_FAUCET)));
+        addProductImage(R.drawable.ramsiers_faucet, "RAMSIER'S faucet");
         addHelp("RAMSIER'S faucet: " + money(priceValue(PRICE_FAUCET, 225)) + ".");
         addQuantityStepper(faucetQuantity);
         addInlineNavigation();
@@ -737,7 +1216,8 @@ public class MainActivity extends Activity {
     private void addWaterfallStep() {
         hideKeyboard();
         page.addView(questionTitle(questionForEdit(PAGE_WATERFALL)));
-        addHelp("Use 0 if you do not want a waterfall.");
+        addProductImage(R.drawable.waterfall_countertop, "Waterfall countertop example");
+        addHelp("Waterfall sides are " + money(WATERFALL_PRICE) + " each. Use 0 if you do not want a waterfall.");
         addQuantityStepper(waterfallQuantity);
         detach(waterfallComments);
         page.addView(waterfallComments);
@@ -746,7 +1226,17 @@ public class MainActivity extends Activity {
 
     private void addProductImage(int imageResource, String description) {
         ImageView image = new ImageView(this);
-        image.setImageResource(imageResource);
+        String savedImage = prefs.getString(productImagePreferenceKey(imageResource), "");
+        if (savedImage.isEmpty()) {
+            image.setImageResource(imageResource);
+        } else {
+            try {
+                image.setImageURI(Uri.parse(savedImage));
+                if (image.getDrawable() == null) image.setImageResource(imageResource);
+            } catch (Exception ignored) {
+                image.setImageResource(imageResource);
+            }
+        }
         image.setContentDescription(description);
         image.setAdjustViewBounds(true);
         image.setScaleType(ImageView.ScaleType.FIT_CENTER);
@@ -762,8 +1252,10 @@ public class MainActivity extends Activity {
     private void addCabinetsStep() {
         hideKeyboard();
         page.addView(questionTitle(questionForEdit(PAGE_CABINETS)));
-        addHelp("Use 0 if cabinets are not in yet.");
-        addQuantityStepper(cabinetInQuantity);
+        RadioGroup cabinetChoices = yesNoGroup(value(cabinetInQuantity) > 0);
+        cabinetChoices.setOnCheckedChangeListener((group, checkedId) ->
+                cabinetInQuantity.setText(checkedYes(group, checkedId) ? "1" : "0"));
+        page.addView(cabinetChoices);
         detach(cabinetsApproximateDate);
         page.addView(cabinetsApproximateDate);
         addInlineNavigation();
@@ -779,6 +1271,19 @@ public class MainActivity extends Activity {
     }
 
     private void addBrandHeader() {
+        String versionName = installedVersionName();
+        TextView version = new TextView(this);
+        version.setText("Version " + versionName);
+        version.setTextSize(12);
+        version.setTypeface(Typeface.DEFAULT_BOLD);
+        version.setTextColor(Color.rgb(91, 58, 41));
+        version.setGravity(Gravity.START);
+        version.setContentDescription("App version " + versionName);
+        version.setPadding(dp(2), dp(20), dp(2), 0);
+        page.addView(version, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+
         TextView title = new TextView(this);
         title.setText("RAMSIER'S\nGRANITE AND QUARTZ");
         title.setTextSize(26);
@@ -787,6 +1292,19 @@ public class MainActivity extends Activity {
         title.setGravity(Gravity.CENTER);
         title.setPadding(0, dp(8), 0, dp(2));
         page.addView(title);
+    }
+
+    private String installedVersionName() {
+        try {
+            String versionName = getPackageManager()
+                    .getPackageInfo(getPackageName(), 0)
+                    .versionName;
+            return versionName == null || versionName.trim().isEmpty()
+                    ? "unknown"
+                    : versionName.trim();
+        } catch (PackageManager.NameNotFoundException ignored) {
+            return "unknown";
+        }
     }
 
     private void addQuestion(String title, EditText field, boolean focus) {
@@ -827,6 +1345,7 @@ public class MainActivity extends Activity {
         detach(slabList);
         page.addView(slabList);
         renderSlabs();
+
         addInlineNavigation();
     }
 
@@ -856,47 +1375,123 @@ public class MainActivity extends Activity {
     private void addPhotoStep() {
         hideKeyboard();
         page.clearFocus();
+        photoAccordionOpen = 2;
         page.addView(questionTitle(questionForEdit(PAGE_PHOTO)));
-        addHelp("Upload a hand-drawn sketch, a 20/20 software drawing, or any clear countertop drawing. AI will estimate the square footage.");
+        addHelp("Upload one or more blueprints, hand-drawn sketches, 20/20 software drawings, or other countertop drawings. AI reads printed and handwritten labels and dimensions, checks each drawing separately, and never estimates a missing measurement.");
 
         Button drawingPlan = accordionButton("Countertop drawing for AI", photoAccordionOpen == 2);
         drawingPlan.setOnClickListener(v -> togglePhotoAccordion(2));
         page.addView(drawingPlan);
         if (photoAccordionOpen == 2) {
             addHelp("Make sure every dimension and its unit can be read clearly.");
-            Button drawingButton = secondaryButton("Take a picture of a drawing");
+            boolean canAddDrawing = drawingPhotoUris.size() < MAX_DRAWING_PHOTOS;
+            Button drawingButton = secondaryButton(
+                    drawingPhotoUris.isEmpty()
+                            ? "Take a picture of a drawing"
+                            : "Take another picture of a drawing");
             drawingButton.setOnClickListener(v -> takeDrawingPhoto());
+            drawingButton.setEnabled(canAddDrawing);
             page.addView(drawingButton);
 
-            Button drawingUploadButton = secondaryButton("Choose a drawing from phone");
+            Button drawingUploadButton = secondaryButton(
+                    drawingPhotoUris.isEmpty()
+                            ? "Choose drawings from phone"
+                            : "Add more drawings from phone");
             drawingUploadButton.setOnClickListener(v -> openDrawingPhotoPicker());
+            drawingUploadButton.setEnabled(canAddDrawing);
             page.addView(drawingUploadButton);
 
-            if (drawingPhotoUri != null) {
-                page.addView(sectionHeader("Original drawing"));
+            if (!drawingPhotoUris.isEmpty()) {
+                activeDrawingIndex = Math.max(
+                        0,
+                        Math.min(activeDrawingIndex, drawingPhotoUris.size() - 1));
+                updateActiveDrawingPreview();
+                page.addView(sectionHeader(
+                        "Original drawing " + (activeDrawingIndex + 1)
+                                + " of " + drawingPhotoUris.size()));
+
+                if (drawingPhotoUris.size() > 1) {
+                    LinearLayout drawingNavigation = new LinearLayout(this);
+                    drawingNavigation.setOrientation(LinearLayout.HORIZONTAL);
+                    drawingNavigation.setGravity(Gravity.CENTER);
+                    Button previousDrawing = secondaryButton("Previous");
+                    previousDrawing.setEnabled(activeDrawingIndex > 0);
+                    previousDrawing.setOnClickListener(v -> selectDrawing(activeDrawingIndex - 1));
+                    drawingNavigation.addView(previousDrawing, new LinearLayout.LayoutParams(
+                            0, dp(52), 1f));
+                    TextView drawingCount = label(
+                            (activeDrawingIndex + 1) + " / " + drawingPhotoUris.size());
+                    drawingCount.setGravity(Gravity.CENTER);
+                    drawingNavigation.addView(drawingCount, new LinearLayout.LayoutParams(
+                            dp(72), dp(52)));
+                    Button nextDrawing = secondaryButton("Next");
+                    nextDrawing.setEnabled(activeDrawingIndex < drawingPhotoUris.size() - 1);
+                    nextDrawing.setOnClickListener(v -> selectDrawing(activeDrawingIndex + 1));
+                    drawingNavigation.addView(nextDrawing, new LinearLayout.LayoutParams(
+                            0, dp(52), 1f));
+                    page.addView(drawingNavigation, new LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT));
+                }
+
                 detach(drawingPhoto);
                 page.addView(drawingPhoto, new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT, dp(300)));
-                addHelp("Tap either picture to compare both at the same time. Pinch or drag each picture separately, or double-tap it to reset.");
+                drawingPhoto.setOnClickListener(v -> showDrawingZoom(activeDrawingIndex));
 
-                if (!aiDrawingConfidence.isEmpty()) {
-                    page.addView(sectionHeader("AI verification redraw — compare every dimension"));
+                LinearLayout drawingActions = new LinearLayout(this);
+                drawingActions.setOrientation(LinearLayout.HORIZONTAL);
+                drawingActions.setGravity(Gravity.CENTER);
+                Button removeDrawingButton = secondaryButton("Remove drawing");
+                removeDrawingButton.setOnClickListener(v -> removeDrawing(activeDrawingIndex));
+                drawingActions.addView(removeDrawingButton, new LinearLayout.LayoutParams(
+                        0, dp(54), 1f));
+                Button clearDrawings = secondaryButton("Clear all");
+                clearDrawings.setOnClickListener(v -> confirmClearDrawings());
+                drawingActions.addView(clearDrawings, new LinearLayout.LayoutParams(
+                        0, dp(54), 1f));
+                page.addView(drawingActions, new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT));
+
+                addHelp(drawingPhotoUris.size() + " drawing"
+                        + (drawingPhotoUris.size() == 1 ? " is" : "s are")
+                        + " selected. Each drawing gets its own editable redraw. Tap either picture to compare and zoom.");
+                if (drawingPhotoUris.size() > 1) {
+                    addHelp("Each upload is counted as a separate countertop area. Do not add two photos of the same plan or it would be counted twice.");
+                }
+                if (!canAddDrawing) {
+                    addHelp("Maximum of " + MAX_DRAWING_PHOTOS + " drawings reached.");
+                }
+
+                if (hasActiveDrawingResult()) {
+                    page.addView(sectionHeader(
+                            "AI verification redraw for drawing "
+                                    + (activeDrawingIndex + 1)
+                                    + " — compare every dimension"));
                     if (aiVerificationDrawing != null) {
                         verificationDrawingView.setVerificationDrawing(aiVerificationDrawing);
+                        verificationDrawingView.setCalculationParts(aiDrawingCalculationParts);
                         verificationDrawingView.setVisibility(View.VISIBLE);
                         detach(verificationDrawingView);
                         page.addView(verificationDrawingView, new LinearLayout.LayoutParams(
                                 ViewGroup.LayoutParams.MATCH_PARENT, dp(380)));
-                        Button editRedraw = secondaryButton("Edit redraw dimensions or add a label");
+                        Button editRedraw = secondaryButton("Edit redraw dimensions");
+                        editRedraw.setEnabled(!drawingAnalysisInProgress);
                         editRedraw.setOnClickListener(v -> showVerificationEditor());
                         page.addView(editRedraw);
                         String units = aiVerificationDrawing.optString("units", "unknown");
                         String unitMessage = "unknown".equals(units)
                                 ? "Check the units shown on the original drawing."
                                 : "Units: " + units + ".";
+                        boolean measuredFallback = aiVerificationDrawing.optBoolean(
+                                "fallback_generated",
+                                false);
                         drawingVerificationStatus.setText(
                                 unitMessage
-                                        + " Tan strips are backsplash pieces."
+                                        + (measuredFallback
+                                        ? " The AI returned measurements without an outline, so the app created this editable measured guide."
+                                        : "")
                                         + " Compare this redraw with the original above before accepting the square footage.");
                     } else {
                         verificationDrawingView.clearDrawing();
@@ -909,10 +1504,34 @@ public class MainActivity extends Activity {
                     page.addView(drawingVerificationStatus);
                 }
 
-                analyzeDrawingButton = primaryButton("Figure square footage with AI");
-                analyzeDrawingButton.setEnabled(!drawingAnalysisInProgress);
-                analyzeDrawingButton.setOnClickListener(v -> analyzeDrawing());
-                page.addView(analyzeDrawingButton);
+                if (DrawingMissingMeasurementPolicy.shouldAsk(
+                        drawingAnalysisInProgress,
+                        hasActiveDrawingResult(),
+                        aiDrawingCanCalculate,
+                        aiDrawingMissingInformation)) {
+                    Button enterMissingMeasurement = primaryButton("Enter missing measurement");
+                    enterMissingMeasurement.setOnClickListener(v -> showMissingMeasurementPrompt());
+                    page.addView(enterMissingMeasurement);
+                    addHelp("The AI will not guess. Enter the measurement yourself before using the drawing for a quote.");
+                }
+
+                if (DrawingRetryPolicy.offerOriginalRetry(
+                        drawingAnalysisInProgress,
+                        aiDrawingLastError)) {
+                    Button retryDrawingAnalysis = secondaryButton("Try original drawing again");
+                    retryDrawingAnalysis.setOnClickListener(v -> analyzeActiveDrawing(false));
+                    page.addView(retryDrawingAnalysis);
+                }
+                if (DrawingRetryPolicy.offerEnhancedRetry(
+                        drawingAnalysisInProgress,
+                        hasActiveDrawingResult(),
+                        aiDrawingCanCalculate,
+                        aiDrawingLastError)) {
+                    Button retryEnhancedDrawing = secondaryButton("Try enhanced black-and-white");
+                    retryEnhancedDrawing.setOnClickListener(v -> analyzeActiveDrawing(true));
+                    page.addView(retryEnhancedDrawing);
+                    addHelp("Enhanced mode may help faint handwriting. Use the original-color result for clean CAD drawings when it is complete.");
+                }
 
                 detach(drawingProgressBar);
                 LinearLayout.LayoutParams progressParams = new LinearLayout.LayoutParams(
@@ -927,43 +1546,7 @@ public class MainActivity extends Activity {
             }
         }
 
-        Button manualMeasurement = accordionButton("Manual Measurement", photoAccordionOpen == 3);
-        manualMeasurement.setOnClickListener(v -> togglePhotoAccordion(3));
-        page.addView(manualMeasurement);
-        if (photoAccordionOpen == 3) {
-            addHelp("L is length in inches. W is width in inches. T is the calculated square feet for that piece. Finish W and the next blank row appears automatically.");
-            detach(manualMeasurementList);
-            page.addView(manualMeasurementList);
-            detach(manualMeasurementTotal);
-            page.addView(manualMeasurementTotal);
-            renderManualMeasurements(false);
-            addHelp("The manual measurement total is used for the quote instead of the AI estimate whenever at least one manual piece has been entered.");
-        }
-
-        Button countertopPhoto = accordionButton("Photos of actual countertop", photoAccordionOpen == 1);
-        countertopPhoto.setOnClickListener(v -> togglePhotoAccordion(1));
-        page.addView(countertopPhoto);
-        if (photoAccordionOpen == 1) {
-            addHelp("Add photos of the customer's actual kitchen or countertop. These photos go with the email.");
-            Button cameraButton = primaryButton("Take photo of countertop");
-            cameraButton.setOnClickListener(v -> takeCountertopPhoto());
-            page.addView(cameraButton);
-            Button photoButton = secondaryButton("Choose countertop photo from phone");
-            photoButton.setOnClickListener(v -> openPhotoPicker());
-            page.addView(photoButton);
-            if (!countertopPhotoUris.isEmpty()) {
-                detach(photoStatus);
-                page.addView(photoStatus);
-                detach(roomPhoto);
-                page.addView(roomPhoto, new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, dp(220)));
-            }
-
-            Button visualizer = secondaryButton("Open MSI room visualizer");
-            visualizer.setOnClickListener(v -> openWebPage(MSI_VISUALIZER));
-            page.addView(visualizer);
-        }
-        addHelp("You may skip this page and tap Next.");
+        addHelp("You may skip this page and tap Next. Manual measurements and countertop photos are on the next two pages.");
         addInlineNavigation();
     }
 
@@ -1242,7 +1825,7 @@ public class MainActivity extends Activity {
         calculateAndDisplay(false);
         if (manualMeasurementList != null) {
             manualMeasurementList.post(() -> {
-                if (photoAccordionOpen == 3 && currentPageId() == PAGE_PHOTO) {
+                if (photoAccordionOpen == 3 && currentPageId() == PAGE_MANUAL_MEASUREMENT) {
                     renderManualMeasurements(focusNewPiece);
                 }
             });
@@ -1284,6 +1867,28 @@ public class MainActivity extends Activity {
         return number.format(value);
     }
 
+    private void addWorkflowCompleteStep() {
+        hideKeyboard();
+        saveJobSnapshot();
+        page.addView(questionTitle("Job workflow complete"));
+        addEstimateSummary(calculateAndDisplay(false));
+        addHelp(hasCompleteCustomerName()
+                ? "The job is saved in the searchable history on this phone."
+                : "Testing mode: this job was not saved because the customer's complete name is missing.");
+        Button email = secondaryButton("Prepare office email");
+        email.setOnClickListener(v -> sendQuoteEmail());
+        page.addView(email);
+        Button back = secondaryButton("Back");
+        back.setOnClickListener(v -> {
+            stepIndex = Math.max(0, pageOrder.size() - 1);
+            showStep();
+        });
+        page.addView(back);
+        Button reset = primaryButton("Start a new customer");
+        reset.setOnClickListener(v -> confirmReset());
+        page.addView(reset);
+    }
+
     private void addReviewStep() {
         hideKeyboard();
         page.clearFocus();
@@ -1291,7 +1896,7 @@ public class MainActivity extends Activity {
         page.addView(questionTitle("Review the quote request"));
 
         TextView customer = label(
-                "Customer: " + text(customerName) + "\n" +
+                "Customer: " + customerFullName() + "\n" +
                 "Phone: " + text(customerPhone) + "\n" +
                 "Email: " + text(customerEmail) + "\n" +
                 "Address: " + text(projectAddress));
@@ -1319,6 +1924,14 @@ public class MainActivity extends Activity {
         detach(totalResult);
         page.addView(totalResult);
 
+        Button printQuote = primaryButton("Print / Save PDF");
+        printQuote.setOnClickListener(v -> printQuoteSummary());
+        page.addView(printQuote);
+
+        Button textQuote = primaryButton("Job finished — text JPEG & payment link");
+        textQuote.setOnClickListener(v -> confirmFinishedAndTextQuote(textQuote));
+        page.addView(textQuote);
+
         addInlineNavigation();
 
         Button reset = secondaryButton("Start a new customer");
@@ -1326,11 +1939,419 @@ public class MainActivity extends Activity {
         page.addView(reset);
     }
 
+    private void printQuoteSummary() {
+        if (!requireCompleteCustomerName("printing or saving a customer quote")) return;
+        try {
+            Estimate estimate = calculateAndDisplay(false);
+            QuotePdfGenerator.Data data = buildQuotePdfData(estimate);
+            File quoteDirectory = new File(getFilesDir(), "quote_pdfs");
+            File quoteFile = new File(
+                    quoteDirectory,
+                    "Ramsiers-Quote-Request-" + safeFileName(customerFullName()) + ".pdf");
+            QuotePdfGenerator.create(quoteFile, data);
+            PrintManager printManager = (PrintManager) getSystemService(Context.PRINT_SERVICE);
+            if (printManager == null) {
+                Toast.makeText(this, "Printing is not available on this phone.", Toast.LENGTH_LONG).show();
+                return;
+            }
+            printManager.print(
+                    "Ramsier's quote request",
+                    new PdfFilePrintAdapter(this, quoteFile),
+                    null);
+        } catch (Exception exception) {
+            Toast.makeText(
+                    this,
+                    "The quote PDF could not be created. Please try again.",
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void confirmFinishedAndTextQuote(Button textQuoteButton) {
+        if (!requireCompleteCustomerName("creating a customer payment link")) return;
+        if (!jobFinished) {
+            Toast.makeText(this, "Mark the installation job finished before creating a payment link.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (!customerSigned) {
+            Toast.makeText(this, "Collect the customer's final quote signature before creating a payment link.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (!paymentMethod.startsWith("ACH")) {
+            Toast.makeText(this, "Choose ACH bank account as the payment method first.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (customerPhone.getText().toString().trim().isEmpty()
+                && customerEmail.getText().toString().trim().isEmpty()) {
+            Toast.makeText(this, "Add the customer's phone number or email address first.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        Estimate estimate = calculateAndDisplay(false);
+        long amountCents = Math.round(estimate.total * 100.0);
+        if (amountCents < 50) {
+            Toast.makeText(
+                    this,
+                    "Enter the completed job's full quote amount first.",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("Is this job finished?")
+                .setMessage(
+                        "Only continue after the countertop job is finished. "
+                                + "Stripe will request the full quote amount of "
+                                + money(estimate.total) + ".")
+                .setPositiveButton(
+                        "Yes — job is finished",
+                        (dialog, which) -> textQuoteSummary(textQuoteButton))
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void textQuoteSummary(Button textQuoteButton) {
+        if (!requireCompleteCustomerName("creating a customer payment link")) return;
+        if (paymentLinkRequestInProgress) return;
+        try {
+            Estimate estimate = calculateAndDisplay(false);
+            long amountCents = Math.round(estimate.total * 100.0);
+            if (amountCents < 50) {
+                throw new IllegalStateException("The full quote amount is missing.");
+            }
+            File quoteDirectory = new File(getFilesDir(), "quote_jpegs");
+            File quoteImage = new File(
+                    quoteDirectory,
+                    "Ramsiers-Final-Quote-" + safeFileName(customerFullName()) + ".jpg");
+            QuotePdfGenerator.createJpeg(quoteImage, buildQuotePdfData(estimate));
+            Uri imageUri = FileProvider.getUriForFile(
+                    this,
+                    getPackageName() + ".fileprovider",
+                    quoteImage);
+
+            File pdfDirectory = new File(getFilesDir(), "quote_pdfs");
+            File quotePdf = new File(
+                    pdfDirectory,
+                    "Ramsiers-Signed-Final-Quote-" + safeFileName(customerFullName()) + ".pdf");
+            QuotePdfGenerator.create(quotePdf, buildQuotePdfData(estimate));
+            Uri pdfUri = FileProvider.getUriForFile(
+                    this,
+                    getPackageName() + ".fileprovider",
+                    quotePdf);
+
+            String quoteReference = paymentQuoteReference(amountCents);
+            paymentLinkRequestInProgress = true;
+            textQuoteButton.setEnabled(false);
+            Toast.makeText(
+                    this,
+                    "Creating the secure Stripe ACH link...",
+                    Toast.LENGTH_SHORT).show();
+
+            new Thread(() -> {
+                try {
+                    String paymentUrl = PaymentLinkClient.create(
+                            PAYMENT_LINK_ENDPOINT,
+                            amountCents,
+                            quoteReference);
+                    runOnUiThread(() -> {
+                        paymentLinkRequestInProgress = false;
+                        textQuoteButton.setEnabled(true);
+                        preparedPaymentUrl = paymentUrl;
+                        preparedPaymentAmountCents = amountCents;
+                        preparedPaymentImageUri = imageUri;
+                        preparedPaymentPdfUri = pdfUri;
+                        showStep();
+                        Toast.makeText(
+                                this,
+                                "Secure ACH link ready. Choose Text or Email, then review before sending.",
+                                Toast.LENGTH_LONG).show();
+                    });
+                } catch (Exception exception) {
+                    runOnUiThread(() -> {
+                        paymentLinkRequestInProgress = false;
+                        textQuoteButton.setEnabled(true);
+                        Toast.makeText(
+                                this,
+                                "The secure Stripe ACH link could not be created. "
+                                        + "Nothing was sent. Check the internet and try again.",
+                                Toast.LENGTH_LONG).show();
+                    });
+                }
+            }).start();
+        } catch (Exception exception) {
+            Toast.makeText(
+                    this,
+                    "The finished quote picture could not be created. Nothing was sent.",
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private String paymentQuoteReference(long amountCents) {
+        if (paymentQuoteReference.isEmpty() || paymentQuoteAmountCents != amountCents) {
+            paymentQuoteReference = "rq_" + UUID.randomUUID().toString().replace("-", "");
+            paymentQuoteAmountCents = amountCents;
+        }
+        return paymentQuoteReference;
+    }
+
+    private void openFinalQuoteMessage(
+            String phone,
+            Estimate estimate,
+            String paymentUrl,
+            Uri imageUri) {
+        if (!requireCompleteCustomerName("preparing the customer's text message")) return;
+        String messageText = "Ramsier's Granite and Quartz\n"
+                + "Your finished quote is attached.\n"
+                + "Full amount due: " + money(estimate.total) + "\n"
+                + "Secure Stripe ACH payment link: " + paymentUrl;
+
+        Intent message = new Intent(Intent.ACTION_SEND);
+        message.setType("image/jpeg");
+        message.putExtra("address", phone);
+        message.putExtra("sms_body", messageText);
+        message.putExtra(Intent.EXTRA_TEXT, messageText);
+        message.putExtra(Intent.EXTRA_STREAM, imageUri);
+        message.setClipData(ClipData.newUri(
+                getContentResolver(),
+                "Ramsier's final quote",
+                imageUri));
+        message.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        try {
+            startActivity(Intent.createChooser(message, "Review and text the customer's final quote"));
+        } catch (Exception exception) {
+            Toast.makeText(
+                    this,
+                    "No messaging app was found. Nothing was sent.",
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private QuotePdfGenerator.Data buildQuotePdfData(Estimate estimate) {
+        QuotePdfGenerator.Data data = new QuotePdfGenerator.Data();
+        data.customer = customerFullName();
+        data.phone = text(customerPhone);
+        data.email = text(customerEmail);
+        data.address = text(projectAddress);
+        data.estimatedTotal = money(estimate.total);
+
+        data.pricedOptions.addAll(buildQuotePriceRows(estimate));
+
+        data.sinkSelections = sinkSelectionDisplay().replace(", ", "  |  ");
+        data.sinkLocationNote = combinedSinkLocationNote();
+        data.waterfall = quantityLabel(value(waterfallQuantity))
+                + "  |  Comments: " + textOrNotProvided(waterfallComments);
+        data.cabinets = "Cabinets in: " + yesNo(value(cabinetInQuantity) > 0)
+                + "  |  Date / notes: " + textOrNotProvided(cabinetsApproximateDate)
+                + "  |  Comments: " + textOrNotProvided(cabinetInterestComments);
+        data.drawingTotal = number.format(estimate.net) + " sq. ft.";
+        data.drawingDetails = printableDrawingDetails(estimate);
+        data.countertopSections = printableCountertopSections();
+        data.selectedSlabs = printableSelectedSlabs();
+        data.projectNotes = textOrNotProvided(projectNotes)
+                + "  |  Ramsier's does not disconnect, reconnect, or perform plumbing work."
+                + "  |  Plumbing notice acknowledged: " + yesNo(plumbingNoticeAcknowledged)
+                + "  |  Customer final-quote signature: " + (customerSigned ? "Accepted" : "Not collected");
+        if (customerSigned && signaturePad.hasInk()) {
+            data.signature = signaturePad.toBitmap();
+            data.signatureCustomer = customerFullName();
+            data.signatureDate = new SimpleDateFormat("MMM d, yyyy h:mm a", Locale.US).format(new Date());
+        }
+        return data;
+    }
+
+    private void openFinalQuoteEmail(
+            String emailAddress,
+            Estimate estimate,
+            String paymentUrl,
+            Uri pdfUri) {
+        if (!requireCompleteCustomerName("preparing the customer's email")) return;
+        String messageText = "Ramsier's Granite and Quartz\n\n"
+                + "Your signed final quote is attached.\n"
+                + "Full amount due: " + money(estimate.total) + "\n"
+                + "Secure Stripe ACH payment link: " + paymentUrl;
+        Intent email = new Intent(Intent.ACTION_SEND);
+        email.setType("application/pdf");
+        email.putExtra(Intent.EXTRA_EMAIL, new String[]{emailAddress});
+        email.putExtra(Intent.EXTRA_SUBJECT, "Ramsier's signed final quote");
+        email.putExtra(Intent.EXTRA_TEXT, messageText);
+        email.putExtra(Intent.EXTRA_STREAM, pdfUri);
+        email.setClipData(ClipData.newUri(
+                getContentResolver(),
+                "Ramsier's signed final quote",
+                pdfUri));
+        email.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        try {
+            startActivity(Intent.createChooser(email, "Review and email the customer's final quote"));
+        } catch (Exception exception) {
+            Toast.makeText(this, "No email app was found. Nothing was sent.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private ArrayList<QuotePdfGenerator.PriceRow> buildQuotePriceRows(Estimate estimate) {
+        QuotePdfGenerator.Data rows = new QuotePdfGenerator.Data();
+        double installedPrice = effectivePricePerSquareFoot();
+        addPdfPriceRow(
+                rows,
+                "Countertop and installation",
+                quantityLabel(estimate.net) + " sq. ft. × " + money(installedPrice)
+                        + " | Slab: " + printableSelectedSlabs(),
+                estimate.net * installedPrice);
+
+        String sinks = sinkSelectionDisplay();
+        if (!"No sink selected".equals(sinks) || value(sinkCharge) > 0) {
+            rows.pricedOptions.add(new QuotePdfGenerator.PriceRow(
+                    "Sink selections",
+                    sinks,
+                    money(value(sinkCharge))));
+        }
+
+        double cooktopCount = value(cooktopCutoutQuantity);
+        double cooktopPrice = priceValue(PRICE_CUTOUT, 100);
+        if (cooktopCount > 0) {
+            addPdfPriceRow(
+                    rows,
+                    "Cooktop or extra cutouts",
+                    quantityLabel(cooktopCount) + " × " + money(cooktopPrice),
+                    cooktopCount * cooktopPrice);
+        }
+
+        double edgeFeet = value(edgeLinearFeet);
+        double edgePrice = priceValue(PRICE_EDGE, 10);
+        if ("Eased and polished".equals(edgeDetail)) {
+            rows.pricedOptions.add(new QuotePdfGenerator.PriceRow(
+                    "Edge detail",
+                    edgeDisplayName(edgeDetail) + " - Free",
+                    "$0.00"));
+        } else {
+            addPdfPriceRow(
+                    rows,
+                    "Edge detail",
+                    edgeDisplayName(edgeDetail) + " - " + quantityLabel(edgeFeet)
+                            + " ft × " + money(edgePrice),
+                    edgeFeet * edgePrice);
+        }
+
+        addQuantityPdfPriceRow(rows, "Ramsier's faucets", faucetQuantity, PRICE_FAUCET, 225);
+        addQuantityPdfPriceRow(rows, "Basket drains", basketQuantity, PRICE_BASKET, 35);
+        addQuantityPdfPriceRow(rows, "Big grids", gridQuantity, PRICE_GRID, 70);
+        double waterfallCount = value(waterfallQuantity);
+        if (waterfallCount > 0) {
+            addPdfPriceRow(
+                    rows,
+                    "Waterfall sides",
+                    quantityLabel(waterfallCount) + " × " + money(WATERFALL_PRICE),
+                    waterfallCount * WATERFALL_PRICE);
+        }
+        if (value(edgeCharge) > 0) addPdfPriceRow(rows, "Extra edge labor", "Additional labor", value(edgeCharge));
+        if (value(tearOutCharge) > 0) addPdfPriceRow(rows, "Tear-out", "Entered charge", value(tearOutCharge));
+        if (value(otherCharge) > 0) addPdfPriceRow(rows, "Other charge", "Entered charge", value(otherCharge));
+        if (countertopRemoval && removalCharge() > 0) {
+            addPdfPriceRow(rows, "Countertop removal",
+                    quantityLabel(value(removalSquareFeet)) + " sq. ft. × $10.00", removalCharge());
+        }
+        return new ArrayList<>(rows.pricedOptions);
+    }
+
+    private void addQuantityPdfPriceRow(
+            QuotePdfGenerator.Data data,
+            String item,
+            EditText quantityField,
+            String preferenceKey,
+            double defaultPrice) {
+        double count = value(quantityField);
+        if (count <= 0) return;
+        double price = priceValue(preferenceKey, defaultPrice);
+        addPdfPriceRow(data, item, quantityLabel(count) + " × " + money(price), count * price);
+    }
+
+    private void addPdfPriceRow(
+            QuotePdfGenerator.Data data,
+            String item,
+            String details,
+            double amount) {
+        data.pricedOptions.add(new QuotePdfGenerator.PriceRow(item, details, money(amount)));
+    }
+
+    private String combinedSinkLocationNote() {
+        ArrayList<String> notes = new ArrayList<>();
+        String rectangle = textOrNotProvided(rectangleVanitySinkLocations);
+        String oval = textOrNotProvided(ovalVanitySinkLocations);
+        if (!"Not provided".equals(rectangle)) notes.add(rectangle);
+        if (!"Not provided".equals(oval)) notes.add(oval);
+        if (notes.isEmpty()) return "Not provided";
+        return android.text.TextUtils.join("  |  ", notes);
+    }
+
+    private String printableDrawingDetails(Estimate estimate) {
+        if (drawingRecords.isEmpty()) {
+            return estimate.manualSquareFeet > 0
+                    ? "Manual countertop sections: " + number.format(estimate.manualSquareFeet) + " sq. ft."
+                    : "No verified drawing estimate.";
+        }
+        StringBuilder details = new StringBuilder();
+        for (int i = 0; i < drawingRecords.size(); i++) {
+            DrawingRecord drawing = drawingRecords.get(i);
+            if (details.length() > 0) details.append("  ");
+            details.append("Drawing ").append(i + 1).append(": ");
+            if (drawing.hasResult() && drawing.canCalculate) {
+                details.append(number.format(drawing.squareFeet)).append(" sq. ft.");
+            } else {
+                details.append("needs manual verification.");
+            }
+        }
+        if (estimate.manualSquareFeet > 0) {
+            details.append("  Additional manual: ")
+                    .append(number.format(estimate.manualSquareFeet)).append(" sq. ft.");
+        }
+        return details.toString();
+    }
+
+    private String printableCountertopSections() {
+        if (sections.isEmpty()) return "No countertop sections added yet.";
+        StringBuilder result = new StringBuilder();
+        for (int i = 0; i < sections.size(); i++) {
+            CounterSection section = sections.get(i);
+            if (result.length() > 0) result.append("  |  ");
+            result.append(section.name).append(": ")
+                    .append(quantityLabel(section.length)).append(" × ")
+                    .append(quantityLabel(section.width)).append(" in × ")
+                    .append(quantityLabel(section.quantity)).append(" = ")
+                    .append(number.format(section.squareFeet())).append(" sq. ft.");
+            if (i == 2 && sections.size() > 3) {
+                result.append("  |  +").append(sections.size() - 3).append(" more");
+                break;
+            }
+        }
+        return result.toString();
+    }
+
+    private String printableSelectedSlabs() {
+        if (slabs.isEmpty()) return "No slabs selected.";
+        StringBuilder result = new StringBuilder();
+        for (int i = 0; i < slabs.size(); i++) {
+            if (result.length() > 0) result.append("  |  ");
+            result.append(slabs.get(i).name);
+            if (i == 2 && slabs.size() > 3) {
+                result.append("  |  +").append(slabs.size() - 3).append(" more");
+                break;
+            }
+        }
+        return result.toString();
+    }
+
+    private String quantityLabel(double value) {
+        if (value == Math.rint(value)) return String.valueOf((long) value);
+        return number.format(value);
+    }
+
+    private String safeFileName(String value) {
+        String clean = value == null ? "Customer" : value.trim().replaceAll("[^A-Za-z0-9_-]+", "-");
+        return clean.isEmpty() ? "Customer" : clean;
+    }
+
     private void addNavigation() {
         Button back = secondaryButton("Back");
         back.setEnabled(stepIndex > 0);
         back.setOnClickListener(v -> {
-            if (currentPageId() == PAGE_PHOTO) commitPendingManualMeasurement(false);
+            if (currentPageId() == PAGE_MANUAL_MEASUREMENT) commitPendingManualMeasurement(false);
             hideKeyboard();
             stepIndex = Math.max(0, stepIndex - 1);
             showStep();
@@ -1353,7 +2374,7 @@ public class MainActivity extends Activity {
         Button back = secondaryButton("Back");
         back.setEnabled(stepIndex > 0);
         back.setOnClickListener(v -> {
-            if (currentPageId() == PAGE_PHOTO) commitPendingManualMeasurement(false);
+            if (currentPageId() == PAGE_MANUAL_MEASUREMENT) commitPendingManualMeasurement(false);
             hideKeyboard();
             stepIndex = Math.max(0, stepIndex - 1);
             showStep();
@@ -1379,10 +2400,14 @@ public class MainActivity extends Activity {
 
     private void handleNext() {
         int pageId = currentPageId();
-        if (pageId == PAGE_PHOTO) commitPendingManualMeasurement(false);
-        if (pageId == PAGE_NAME && customerName.getText().toString().trim().isEmpty()) {
-            Toast.makeText(this, "Enter the customer's name.", Toast.LENGTH_SHORT).show();
-            customerName.requestFocus();
+        if (pageId == PAGE_MANUAL_MEASUREMENT) commitPendingManualMeasurement(false);
+        if (pageId == PAGE_NAME
+                && !CustomerNamePolicy.canAdvance(
+                        REQUIRE_CUSTOMER_NAME_BEFORE_NEXT,
+                        customerFirstName.getText().toString(),
+                        customerLastName.getText().toString())) {
+            Toast.makeText(this, "Enter the customer's first and last name.", Toast.LENGTH_SHORT).show();
+            (isBlank(customerFirstName) ? customerFirstName : customerLastName).requestFocus();
             return;
         }
         if (pageId == PAGE_OFFICE_EMAIL) {
@@ -1413,6 +2438,29 @@ public class MainActivity extends Activity {
             showKeyboard(edgeLinearFeet);
             return;
         }
+        if (pageId == PAGE_COUNTERTOP_REMOVAL && countertopRemoval && value(removalSquareFeet) <= 0) {
+            Toast.makeText(this, "Enter the square feet being removed.", Toast.LENGTH_LONG).show();
+            removalSquareFeet.requestFocus();
+            return;
+        }
+        if (pageId == PAGE_TEMPLATE_UPDATE && effectivePricePerSquareFoot() <= 0) {
+            Toast.makeText(this, "Enter the final installed price per square foot.", Toast.LENGTH_LONG).show();
+            finalPricePerSqFt.requestFocus();
+            return;
+        }
+        if (pageId == PAGE_REVIEW_QUOTE && value(pricePerSqFt) <= 0) {
+            Toast.makeText(this, "Enter the installed price per square foot for the quote.", Toast.LENGTH_LONG).show();
+            pricePerSqFt.requestFocus();
+            return;
+        }
+        if (pageId == PAGE_CUSTOMER_SIGNATURE && !customerSigned) {
+            Toast.makeText(this, "Collect and accept the customer's final quote signature first.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (pageId == PAGE_PLUMBING_NOTICE && !plumbingNoticeAcknowledged) {
+            Toast.makeText(this, "Confirm that the customer was told Ramsier's does not do plumbing.", Toast.LENGTH_LONG).show();
+            return;
+        }
         if (pageId >= CUSTOM_PAGE_START) {
             EditText field = customInputs.get(pageId);
             if (field != null) {
@@ -1437,10 +2485,164 @@ public class MainActivity extends Activity {
     }
 
     private int totalSteps() {
-        return pageOrder.size() + 1;
+        return pageOrder.size();
+    }
+
+    private void requestAdminAccess() {
+        hideKeyboard();
+        if (adminSessionExpiresAt > System.currentTimeMillis()) {
+            adminSessionExpiresAt = System.currentTimeMillis() + ADMIN_SESSION_MILLIS;
+            showLiveEditScreen();
+            return;
+        }
+        if (!prefs.contains(ADMIN_PIN_HASH) || !prefs.contains(ADMIN_PIN_SALT)) {
+            showCreateAdminPinDialog(false);
+            return;
+        }
+        long lockUntil = prefs.getLong(ADMIN_PIN_LOCK_UNTIL, 0);
+        if (lockUntil > System.currentTimeMillis()) {
+            long seconds = Math.max(1, (lockUntil - System.currentTimeMillis() + 999) / 1000);
+            Toast.makeText(this, "Admin access is locked for " + seconds + " more seconds.", Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        EditText pin = adminPinField("6-digit owner PIN");
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Admin access")
+                .setMessage("Enter the owner PIN to change prices, product pictures, or pages.")
+                .setView(pin)
+                .setPositiveButton("Unlock", null)
+                .setNegativeButton("Cancel", null)
+                .create();
+        dialog.setOnShowListener(ignored -> {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(button -> {
+                if (verifyAdminPin(pin.getText().toString())) {
+                    prefs.edit()
+                            .putInt(ADMIN_PIN_FAILURES, 0)
+                            .remove(ADMIN_PIN_LOCK_UNTIL)
+                            .apply();
+                    adminSessionExpiresAt = System.currentTimeMillis() + ADMIN_SESSION_MILLIS;
+                    dialog.dismiss();
+                    showLiveEditScreen();
+                    return;
+                }
+                int failures = prefs.getInt(ADMIN_PIN_FAILURES, 0) + 1;
+                SharedPreferences.Editor editor = prefs.edit().putInt(ADMIN_PIN_FAILURES, failures);
+                if (failures >= 5) {
+                    editor.putInt(ADMIN_PIN_FAILURES, 0)
+                            .putLong(ADMIN_PIN_LOCK_UNTIL, System.currentTimeMillis() + 60_000L);
+                }
+                editor.apply();
+                pin.setText("");
+                pin.setError(failures >= 5
+                        ? "Too many attempts. Admin access is locked for 60 seconds."
+                        : "That PIN is incorrect.");
+            });
+            pin.requestFocus();
+            pin.postDelayed(() -> showKeyboard(pin), 180);
+        });
+        dialog.show();
+    }
+
+    private void showCreateAdminPinDialog(boolean replacing) {
+        if (replacing && !requireActiveAdminSession()) return;
+        LinearLayout form = new LinearLayout(this);
+        form.setOrientation(LinearLayout.VERTICAL);
+        form.setPadding(dp(22), dp(6), dp(22), 0);
+        EditText pin = adminPinField("Create a 6-digit owner PIN");
+        EditText confirm = adminPinField("Enter the same PIN again");
+        form.addView(pin);
+        form.addView(confirm);
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(replacing ? "Change admin PIN" : "Create admin PIN")
+                .setMessage("This PIN protects price, picture, and page changes on this phone.")
+                .setView(form)
+                .setPositiveButton("Save PIN", null)
+                .setNegativeButton("Cancel", null)
+                .create();
+        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener(button -> {
+                    String first = pin.getText().toString();
+                    String second = confirm.getText().toString();
+                    if (!first.matches("\\d{6}")) {
+                        pin.setError("Use exactly 6 numbers.");
+                        return;
+                    }
+                    if (!first.equals(second)) {
+                        confirm.setError("The PINs do not match.");
+                        return;
+                    }
+                    try {
+                        saveAdminPin(first);
+                    } catch (Exception exception) {
+                        pin.setError("The PIN could not be protected on this phone.");
+                        return;
+                    }
+                    adminSessionExpiresAt = System.currentTimeMillis() + ADMIN_SESSION_MILLIS;
+                    dialog.dismiss();
+                    showLiveEditScreen();
+                    Toast.makeText(this, replacing ? "Admin PIN changed." : "Admin PIN created.", Toast.LENGTH_SHORT).show();
+                }));
+        dialog.show();
+    }
+
+    private EditText adminPinField(String hint) {
+        EditText field = input(hint,
+                InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+        field.setSingleLine(true);
+        return field;
+    }
+
+    private void saveAdminPin(String pin) {
+        try {
+            byte[] salt = new byte[16];
+            new SecureRandom().nextBytes(salt);
+            byte[] hash = adminPinHash(pin, salt);
+            prefs.edit()
+                    .putString(ADMIN_PIN_SALT, Base64.encodeToString(salt, Base64.NO_WRAP))
+                    .putString(ADMIN_PIN_HASH, Base64.encodeToString(hash, Base64.NO_WRAP))
+                    .putInt(ADMIN_PIN_FAILURES, 0)
+                    .remove(ADMIN_PIN_LOCK_UNTIL)
+                    .apply();
+        } catch (Exception exception) {
+            throw new IllegalStateException("The admin PIN could not be protected.", exception);
+        }
+    }
+
+    private boolean verifyAdminPin(String pin) {
+        try {
+            if (!pin.matches("\\d{6}")) return false;
+            byte[] salt = Base64.decode(prefs.getString(ADMIN_PIN_SALT, ""), Base64.NO_WRAP);
+            byte[] expected = Base64.decode(prefs.getString(ADMIN_PIN_HASH, ""), Base64.NO_WRAP);
+            return MessageDigest.isEqual(expected, adminPinHash(pin, salt));
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private byte[] adminPinHash(String pin, byte[] salt) throws Exception {
+        PBEKeySpec spec = new PBEKeySpec(pin.toCharArray(), salt, ADMIN_PIN_ITERATIONS, 256);
+        try {
+            return SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+                    .generateSecret(spec)
+                    .getEncoded();
+        } finally {
+            spec.clearPassword();
+        }
+    }
+
+    private boolean requireActiveAdminSession() {
+        if (adminSessionExpiresAt <= System.currentTimeMillis()) {
+            adminSessionExpiresAt = 0;
+            requestAdminAccess();
+            return false;
+        }
+        adminSessionExpiresAt = System.currentTimeMillis() + ADMIN_SESSION_MILLIS;
+        return true;
     }
 
     private void showLiveEditScreen() {
+        if (!requireActiveAdminSession()) return;
         hideKeyboard();
         page.removeAllViews();
         navigation.removeAllViews();
@@ -1451,6 +2653,41 @@ public class MainActivity extends Activity {
         Button managePages = primaryButton("Add, remove, rename, or move pages");
         managePages.setOnClickListener(v -> showManagePagesScreen());
         page.addView(managePages);
+
+        Button changePin = secondaryButton("Change admin PIN");
+        changePin.setOnClickListener(v -> showCreateAdminPinDialog(true));
+        page.addView(changePin);
+
+        page.addView(sectionHeader("Drawing AI phone connection"));
+        boolean protectedDrawingEndpoint =
+                DrawingEndpointAuthPolicy.requiresDeviceAuthentication(DRAWING_AI_ENDPOINT);
+        DrawingDeviceCredential drawingCredential = drawingDeviceCredentialStore.load();
+        if (!protectedDrawingEndpoint) {
+            addHelp(
+                    "Drawing AI remains available through the current service. "
+                            + "Private phone connection will be enabled after the secure Ramsiers service is activated.");
+        } else if (drawingCredential == null) {
+            addHelp("Not connected. An owner must connect this phone before using Drawing AI.");
+        } else {
+            addHelp("Connected — phone ID " + drawingCredential.deviceId()
+                    + ". The private connection token is protected and is never shown.");
+        }
+        Button scanDrawingConnection = primaryButton("Scan connection QR");
+        scanDrawingConnection.setEnabled(protectedDrawingEndpoint);
+        scanDrawingConnection.setOnClickListener(v -> startDrawingEnrollmentScan());
+        page.addView(scanDrawingConnection);
+        Button disconnectDrawingConnection = secondaryButton("Disconnect Drawing AI");
+        disconnectDrawingConnection.setEnabled(drawingCredential != null);
+        disconnectDrawingConnection.setOnClickListener(v -> confirmDrawingAiDisconnect());
+        page.addView(disconnectDrawingConnection);
+
+        page.addView(sectionHeader("Shared customer jobs"));
+        addHelp(connectedCustomerJobsFolderMessage());
+        Button connectDrive = primaryButton(hasCustomerJobsFolder()
+                ? "Change shared Google Drive folder"
+                : "Connect shared Google Drive folder");
+        connectDrive.setOnClickListener(v -> openCustomerJobsFolderPicker());
+        page.addView(connectDrive);
 
         page.addView(sectionHeader("Prices"));
         EditText cutoutPrice = editorField(
@@ -1468,6 +2705,18 @@ public class MainActivity extends Activity {
         EditText gridPrice = editorField(
                 "Big grid price each",
                 priceValue(PRICE_GRID, 70));
+
+        page.addView(sectionHeader("Product pictures"));
+        addAdminProductImageButton("Equal double-bowl sink", R.drawable.sink_equal_double);
+        addAdminProductImageButton("Offset double-bowl sink", R.drawable.sink_offset_double);
+        addAdminProductImageButton("Single-bowl sink", R.drawable.sink_single_bowl);
+        addAdminProductImageButton("Rectangle vanity sink", R.drawable.vanity_sink_rectangle);
+        addAdminProductImageButton("Oval vanity sink", R.drawable.vanity_sink_oval);
+        addAdminProductImageButton("Edge detail chart", R.drawable.edge_details);
+        addAdminProductImageButton("Ramsier's faucet", R.drawable.ramsiers_faucet);
+        addAdminProductImageButton("Basket drain", R.drawable.basket_drain);
+        addAdminProductImageButton("Big sink grid", R.drawable.sink_grid);
+        addAdminProductImageButton("Waterfall example", R.drawable.waterfall_countertop);
 
         page.addView(sectionHeader("Edge choice names"));
         EditText easedName = editorTextField(
@@ -1530,6 +2779,7 @@ public class MainActivity extends Activity {
             EditText bigRoundName,
             EditText bevelName,
             EditText bigBevelName) {
+        if (!requireActiveAdminSession()) return false;
         if (value(cutoutPrice) < 0
                 || value(edgePrice) < 0
                 || value(faucetPrice) < 0
@@ -1559,6 +2809,58 @@ public class MainActivity extends Activity {
                 .putString("edge_name_big_bevel", bigBevelName.getText().toString().trim())
                 .apply();
         return true;
+    }
+
+    private void addAdminProductImageButton(String label, int imageResource) {
+        String preferenceKey = productImagePreferenceKey(imageResource);
+        LinearLayout row = itemRow();
+        row.setOrientation(LinearLayout.VERTICAL);
+        TextView name = label(label + (prefs.getString(preferenceKey, "").isEmpty()
+                ? " — original picture"
+                : " — custom picture"));
+        name.setTypeface(Typeface.DEFAULT_BOLD);
+        row.addView(name);
+        LinearLayout buttons = new LinearLayout(this);
+        buttons.setOrientation(LinearLayout.HORIZONTAL);
+        Button replace = miniButton("REPLACE");
+        replace.setOnClickListener(v -> openAdminProductImagePicker(preferenceKey));
+        buttons.addView(replace, new LinearLayout.LayoutParams(0, dp(46), 1f));
+        Button original = miniButton("USE ORIGINAL");
+        original.setEnabled(!prefs.getString(preferenceKey, "").isEmpty());
+        original.setOnClickListener(v -> {
+            if (!requireActiveAdminSession()) return;
+            prefs.edit().remove(preferenceKey).apply();
+            adminSessionExpiresAt = System.currentTimeMillis() + ADMIN_SESSION_MILLIS;
+            showLiveEditScreen();
+        });
+        buttons.addView(original, new LinearLayout.LayoutParams(0, dp(46), 1f));
+        row.addView(buttons);
+        page.addView(row);
+    }
+
+    private void openAdminProductImagePicker(String preferenceKey) {
+        if (!requireActiveAdminSession()) return;
+        pendingProductImageKey = preferenceKey;
+        Intent image = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        image.addCategory(Intent.CATEGORY_OPENABLE);
+        image.setType("image/*");
+        image.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        startActivityForResult(image, PICK_ADMIN_PRODUCT_IMAGE);
+    }
+
+    private String productImagePreferenceKey(int imageResource) {
+        if (imageResource == R.drawable.sink_equal_double) return "product_image_sink_equal_double";
+        if (imageResource == R.drawable.sink_offset_double) return "product_image_sink_offset_double";
+        if (imageResource == R.drawable.sink_single_bowl) return "product_image_sink_single_bowl";
+        if (imageResource == R.drawable.vanity_sink_rectangle) return "product_image_vanity_rectangle";
+        if (imageResource == R.drawable.vanity_sink_oval) return "product_image_vanity_oval";
+        if (imageResource == R.drawable.edge_details) return "product_image_edge_details";
+        if (imageResource == R.drawable.ramsiers_faucet) return "product_image_faucet";
+        if (imageResource == R.drawable.basket_drain) return "product_image_basket";
+        if (imageResource == R.drawable.sink_grid) return "product_image_grid";
+        if (imageResource == R.drawable.waterfall_countertop) return "product_image_waterfall";
+        return "product_image_" + imageResource;
     }
 
     private void shareLiveEditorChanges() {
@@ -1611,6 +2913,7 @@ public class MainActivity extends Activity {
     }
 
     private void showManagePagesScreen(int keepIndexVisible) {
+        if (!requireActiveAdminSession()) return;
         hideKeyboard();
         page.removeAllViews();
         navigation.removeAllViews();
@@ -1685,6 +2988,7 @@ public class MainActivity extends Activity {
     }
 
     private void movePage(int from, int to) {
+        if (!requireActiveAdminSession()) return;
         if (from < 0 || to < 0 || from >= pageOrder.size() || to >= pageOrder.size()) return;
         int pageId = pageOrder.remove(from);
         pageOrder.add(to, pageId);
@@ -1700,6 +3004,7 @@ public class MainActivity extends Activity {
     }
 
     private void removePage(int index) {
+        if (!requireActiveAdminSession()) return;
         if (index < 0 || index >= pageOrder.size()) return;
         pageOrder.remove(index);
         if (stepIndex >= pageOrder.size()) {
@@ -1710,6 +3015,7 @@ public class MainActivity extends Activity {
     }
 
     private void showAddPageDialog() {
+        if (!requireActiveAdminSession()) return;
         ArrayList<Integer> availableIds = new ArrayList<>();
         ArrayList<String> labels = new ArrayList<>();
         for (int pageId : allBuiltInPageIds()) {
@@ -1742,6 +3048,7 @@ public class MainActivity extends Activity {
     }
 
     private void showEditPageDialog(int pageId) {
+        if (!requireActiveAdminSession()) return;
         LinearLayout form = new LinearLayout(this);
         form.setOrientation(LinearLayout.VERTICAL);
         form.setPadding(dp(12), dp(8), dp(12), 0);
@@ -1786,6 +3093,7 @@ public class MainActivity extends Activity {
     }
 
     private void showCustomPageDialog() {
+        if (!requireActiveAdminSession()) return;
         LinearLayout form = new LinearLayout(this);
         form.setOrientation(LinearLayout.VERTICAL);
         form.setPadding(dp(12), dp(8), dp(12), 0);
@@ -1821,12 +3129,79 @@ public class MainActivity extends Activity {
 
     private void startQrScan() {
         hideKeyboard();
+        pendingQrScanPurpose = QR_SCAN_SLAB;
         IntentIntegrator integrator = new IntentIntegrator(this);
+        integrator.setRequestCode(QR_SCAN_SLAB_REQUEST);
         integrator.setPrompt("Point the camera at the slab QR code");
         integrator.setBeepEnabled(true);
         integrator.setOrientationLocked(true);
         integrator.setDesiredBarcodeFormats(Collections.singleton(BarcodeFormat.QR_CODE.toString()));
         integrator.initiateScan();
+    }
+
+    private void startDrawingEnrollmentScan() {
+        if (!requireActiveAdminSession()) return;
+        if (!DrawingEndpointAuthPolicy.requiresDeviceAuthentication(DRAWING_AI_ENDPOINT)) {
+            Toast.makeText(
+                    this,
+                    "Private phone connection will be available after the secure Ramsiers Drawing AI service is activated.",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        hideKeyboard();
+        pendingQrScanPurpose = QR_SCAN_DRAWING_ENROLLMENT;
+        IntentIntegrator integrator = new IntentIntegrator(this);
+        integrator.setRequestCode(QR_SCAN_DRAWING_ENROLLMENT_REQUEST);
+        integrator.setPrompt("Point the camera at the private Drawing AI connection QR code");
+        integrator.setBeepEnabled(true);
+        integrator.setOrientationLocked(true);
+        integrator.setDesiredBarcodeFormats(Collections.singleton(BarcodeFormat.QR_CODE.toString()));
+        integrator.initiateScan();
+    }
+
+    private void saveDrawingEnrollment(String rawValue) {
+        if (!requireActiveAdminSession()) return;
+        if (!DrawingEndpointAuthPolicy.requiresDeviceAuthentication(DRAWING_AI_ENDPOINT)) {
+            Toast.makeText(
+                    this,
+                    "This app version is not using the protected Ramsiers Drawing AI service yet.",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        try {
+            DrawingDeviceCredential credential = DrawingEnrollmentParser.parse(rawValue);
+            drawingDeviceCredentialStore.save(credential);
+            adminSessionExpiresAt = System.currentTimeMillis() + ADMIN_SESSION_MILLIS;
+            showLiveEditScreen();
+            Toast.makeText(this, "Drawing AI connected on this phone.", Toast.LENGTH_LONG).show();
+        } catch (Exception exception) {
+            Toast.makeText(
+                    this,
+                    "That is not a valid Drawing AI connection QR code. Ask the owner to create a new code.",
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void confirmDrawingAiDisconnect() {
+        if (!requireActiveAdminSession()) return;
+        new AlertDialog.Builder(this)
+                .setTitle("Disconnect Drawing AI?")
+                .setMessage("This removes the private Drawing AI connection from this phone. It does not delete jobs or drawings.")
+                .setPositiveButton("Disconnect", (dialog, which) -> {
+                    if (!requireActiveAdminSession()) return;
+                    if (!drawingDeviceCredentialStore.disconnect()) {
+                        Toast.makeText(
+                                this,
+                                "Drawing AI could not be disconnected. Try again.",
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    adminSessionExpiresAt = System.currentTimeMillis() + ADMIN_SESSION_MILLIS;
+                    showLiveEditScreen();
+                    Toast.makeText(this, "Drawing AI disconnected.", Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
     }
 
     private void showManualSlabDialog() {
@@ -1986,12 +3361,16 @@ public class MainActivity extends Activity {
     }
 
     private Estimate calculateAndDisplay(boolean showWarnings) {
-        double manualGross = 0;
-        for (CounterSection section : sections) manualGross += section.squareFeet();
-        boolean useAiDrawing = manualGross <= 0 && aiDrawingSquareFeet > 0;
-        double gross = useAiDrawing ? aiDrawingSquareFeet : manualGross;
-        double stove = useAiDrawing ? 0 : (value(stoveLength) * value(stoveWidth)) / 144.0;
-        double net = Math.max(0, gross - stove);
+        double manualGross = manualCountertopSquareFeet();
+        boolean hasAiDrawing = hasCompleteAiDrawingEstimate();
+        QuoteSquareFootMath.Result squareFeet = QuoteSquareFootMath.calculate(
+                combinedAiDrawingSquareFeet(),
+                manualGross,
+                (value(stoveLength) * value(stoveWidth)) / 144.0,
+                hasAiDrawing);
+        double gross = squareFeet.grossSquareFeet;
+        double stove = squareFeet.stoveSquareFeet;
+        double net = JobWorkflow.finalSquareFeet(squareFeet.netSquareFeet, value(additionalSquareFeet));
         double cooktopPrice = priceValue(PRICE_CUTOUT, 100);
         double edgePrice = priceValue(PRICE_EDGE, 10);
         double faucetPrice = priceValue(PRICE_FAUCET, 225);
@@ -2004,7 +3383,8 @@ public class MainActivity extends Activity {
         double faucetTotal = value(faucetQuantity) * faucetPrice;
         double basketTotal = value(basketQuantity) * basketPrice;
         double gridTotal = value(gridQuantity) * gridPrice;
-        double total = net * value(pricePerSqFt)
+        double waterfallTotal = value(waterfallQuantity) * WATERFALL_PRICE;
+        double total = net * effectivePricePerSquareFoot()
                 + value(sinkCharge)
                 + value(edgeCharge)
                 + value(tearOutCharge)
@@ -2013,7 +3393,9 @@ public class MainActivity extends Activity {
                 + edgeDetailTotal
                 + faucetTotal
                 + basketTotal
-                + gridTotal;
+                + gridTotal
+                + waterfallTotal
+                + removalCharge();
 
         if (squareFootResult != null) squareFootResult.setText("Net square footage: " + number.format(net));
         if (totalResult != null) totalResult.setText("Estimated total: $" + number.format(total));
@@ -2021,7 +3403,20 @@ public class MainActivity extends Activity {
         if (showWarnings && gross <= 0) {
             Toast.makeText(this, "Add a countertop section or use the AI drawing estimate first.", Toast.LENGTH_LONG).show();
         }
-        return new Estimate(gross, stove, net, total);
+        return new Estimate(
+                squareFeet.aiSquareFeet,
+                squareFeet.manualSquareFeet,
+                gross,
+                stove,
+                net,
+                total,
+                hasAiDrawing);
+    }
+
+    private double manualCountertopSquareFeet() {
+        double total = 0;
+        for (CounterSection section : sections) total += section.squareFeet();
+        return total;
     }
 
     private String optionsSummary() {
@@ -2034,6 +3429,7 @@ public class MainActivity extends Activity {
         double edgeTotal = "Eased and polished".equals(edgeDetail) ? 0 : value(edgeLinearFeet) * edgePrice;
         double basketTotal = value(basketQuantity) * basketPrice;
         double gridTotal = value(gridQuantity) * gridPrice;
+        double waterfallTotal = value(waterfallQuantity) * WATERFALL_PRICE;
         return "Cooktop or extra cutouts: " + number.format(value(cooktopCutoutQuantity))
                 + " × " + money(cooktopPrice) + " = " + money(cutoutTotal)
                 + "\nEdge detail: " + edgeDisplayName(edgeDetail)
@@ -2049,10 +3445,16 @@ public class MainActivity extends Activity {
                 + "\nBig grids: " + number.format(value(gridQuantity))
                 + " × " + money(gridPrice) + " = " + money(gridTotal)
                 + "\nWaterfall sides: " + number.format(value(waterfallQuantity))
+                + " × " + money(WATERFALL_PRICE) + " = " + money(waterfallTotal)
                 + "\nWaterfall comments: " + textOrNotProvided(waterfallComments)
-                + "\nCabinet areas in: " + number.format(value(cabinetInQuantity))
+                + "\nCabinets in: " + yesNo(value(cabinetInQuantity) > 0)
                 + "\nCabinet date / notes: " + textOrNotProvided(cabinetsApproximateDate)
                 + "\nCabinet comments: " + textOrNotProvided(cabinetInterestComments)
+                + "\nAdditional template square feet: " + number.format(value(additionalSquareFeet))
+                + "\nCountertop removal: " + (countertopRemoval
+                ? number.format(value(removalSquareFeet)) + " sq ft × $10.00 = " + money(removalCharge())
+                : "No")
+                + "\nPlumbing work by Ramsier's: No"
                 + drawingEstimateSummary();
     }
 
@@ -2095,19 +3497,31 @@ public class MainActivity extends Activity {
     }
 
     private String drawingEstimateSummary() {
-        if (aiDrawingExplanation.isEmpty()) return "";
-        String result = aiDrawingCanCalculate
-                ? (aiDrawingEditedByUser ? "\nEdited drawing estimate: " : "\nAI drawing estimate: ")
-                + number.format(aiDrawingSquareFeet) + " sq ft"
-                : "\nAI drawing: Square footage could not be calculated";
-        return result
-                + (aiDrawingEditedByUser
-                ? "\nDrawing measurements: edited by user"
-                : "\nAI confidence: " + aiDrawingConfidence)
-                + "\nDrawing calculation: " + aiDrawingExplanation
-                + (aiDrawingMissingInformation.isEmpty()
-                ? ""
-                : "\nMissing drawing information: " + aiDrawingMissingInformation);
+        if (drawingRecords.isEmpty() || analyzedDrawingCount() == 0) return "";
+        StringBuilder result = new StringBuilder();
+        if (hasCompleteAiDrawingEstimate()) {
+            result.append("\nCombined verified drawing estimate: ")
+                    .append(number.format(combinedAiDrawingSquareFeet()))
+                    .append(" sq ft");
+        } else {
+            result.append("\nDrawing estimate is incomplete and was not used for pricing.");
+        }
+        for (int i = 0; i < drawingRecords.size(); i++) {
+            DrawingRecord drawing = drawingRecords.get(i);
+            result.append("\nDrawing ").append(i + 1).append(": ");
+            if (drawing.hasResult() && drawing.canCalculate) {
+                result.append(number.format(drawing.squareFeet)).append(" sq ft");
+                if (drawing.editedByUser) result.append(" (edited by user)");
+            } else if (drawing.hasResult()) {
+                result.append("could not be calculated");
+            } else {
+                result.append("not analyzed");
+            }
+            if (!drawing.missingInformation.isEmpty()) {
+                result.append(" — missing: ").append(drawing.missingInformation);
+            }
+        }
+        return result.toString();
     }
 
     private void openPhotoPicker() {
@@ -2120,13 +3534,1111 @@ public class MainActivity extends Activity {
 
     private void openDrawingPhotoPicker() {
         hideKeyboard();
+        if (drawingPhotoUris.size() >= MAX_DRAWING_PHOTOS) {
+            Toast.makeText(
+                    this,
+                    "You can use up to " + MAX_DRAWING_PHOTOS + " drawings at one time.",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("image/*");
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
         startActivityForResult(intent, PICK_DRAWING_IMAGE);
     }
 
+    private void addCustomerNameStep() {
+        page.addView(questionTitle(questionText(PAGE_NAME, "What is the customer's name?")));
+        addHelp(REQUIRE_CUSTOMER_NAME_BEFORE_NEXT
+                ? "First and last names are stored separately so jobs remain easy to search."
+                : "Testing mode: you can move through pages without a name. Enter both names before saving, signing, printing, calendar, email, or payment actions.");
+        detach(customerFirstName);
+        page.addView(customerFirstName);
+        detach(customerLastName);
+        page.addView(customerLastName);
+        addInlineNavigation();
+        customerFirstName.requestFocus();
+        customerFirstName.postDelayed(() -> showKeyboard(customerFirstName), 220);
+    }
+
+    private void addJobSearchStep() {
+        hideKeyboard();
+        page.addView(questionTitle("Find a job or start a new one"));
+        addHelp("Open Saved jobs to search or reopen a customer job. Tap Next to start or continue the current job.");
+
+        Button savedJobsMenu = accordionButton("Saved jobs", savedJobsMenuOpen);
+        savedJobsMenu.setContentDescription(
+                "Saved jobs menu, " + (savedJobsMenuOpen ? "expanded" : "collapsed"));
+        page.addView(savedJobsMenu);
+
+        LinearLayout savedJobsPanel = new LinearLayout(this);
+        savedJobsPanel.setOrientation(LinearLayout.VERTICAL);
+        savedJobsPanel.setBackgroundColor(Color.WHITE);
+        savedJobsPanel.setPadding(0, dp(4), 0, dp(6));
+        savedJobsPanel.setVisibility(savedJobsMenuOpen ? View.VISIBLE : View.GONE);
+
+        addHelpTo(savedJobsPanel,
+                "Search by any saved word. Shared Drive lets authorized employees see the same customer jobs.");
+        detach(jobSearchInput);
+        savedJobsPanel.addView(jobSearchInput);
+        Button search = primaryButton("Search saved jobs");
+        search.setOnClickListener(v -> showJobSearchResults(jobSearchInput.getText().toString()));
+        savedJobsPanel.addView(search);
+        Button history = secondaryButton("View all saved jobs");
+        history.setOnClickListener(v -> showJobSearchResults(""));
+        savedJobsPanel.addView(history);
+        Button driveSearch = primaryButton("Search all shared Drive jobs");
+        driveSearch.setOnClickListener(v -> showDriveJobSearchResults(jobSearchInput.getText().toString()));
+        savedJobsPanel.addView(driveSearch);
+        Button driveSave = secondaryButton("Save current customer to Drive");
+        driveSave.setOnClickListener(v -> saveCurrentJobToDrive());
+        savedJobsPanel.addView(driveSave);
+        addHelpTo(savedJobsPanel, connectedCustomerJobsFolderMessage());
+        page.addView(savedJobsPanel, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        savedJobsMenu.setOnClickListener(v -> {
+            savedJobsMenuOpen = !savedJobsMenuOpen;
+            if (!savedJobsMenuOpen) hideKeyboard();
+            savedJobsPanel.setVisibility(savedJobsMenuOpen ? View.VISIBLE : View.GONE);
+            savedJobsMenu.setText((savedJobsMenuOpen ? "▲  " : "▼  ") + "Saved jobs");
+            savedJobsMenu.setContentDescription(
+                    "Saved jobs menu, " + (savedJobsMenuOpen ? "expanded" : "collapsed"));
+            savedJobsMenu.requestFocus();
+            savedJobsMenu.announceForAccessibility(
+                    "Saved jobs menu " + (savedJobsMenuOpen ? "expanded" : "collapsed"));
+        });
+
+        Button admin = secondaryButton("Admin settings");
+        admin.setOnClickListener(v -> requestAdminAccess());
+        page.addView(admin);
+        addInlineNavigation();
+    }
+
+    private void addHelpTo(LinearLayout parent, String text) {
+        TextView help = label(text);
+        help.setTextSize(14);
+        help.setGravity(Gravity.CENTER);
+        help.setTextColor(Color.DKGRAY);
+        parent.addView(help);
+    }
+
+    private void addManualMeasurementStep() {
+        hideKeyboard();
+        page.addView(questionTitle("Manual measurement"));
+        addHelp("L is length in inches. W is width in inches. T is the calculated square feet. Use this only for countertop not already counted by the drawing AI.");
+        photoAccordionOpen = 3;
+        detach(manualMeasurementList);
+        page.addView(manualMeasurementList);
+        detach(manualMeasurementTotal);
+        page.addView(manualMeasurementTotal);
+        renderManualMeasurements(false);
+        addInlineNavigation();
+    }
+
+    private void addCountertopPhotosStep() {
+        hideKeyboard();
+        page.addView(questionTitle("Photos of the actual countertop"));
+        addHelp("These pictures stay with the job and can be included in the office email. They are never sent to Stripe.");
+        Button camera = primaryButton("Take photo of countertop");
+        camera.setOnClickListener(v -> takeCountertopPhoto());
+        page.addView(camera);
+        Button gallery = secondaryButton("Choose countertop photo from phone");
+        gallery.setOnClickListener(v -> openPhotoPicker());
+        page.addView(gallery);
+        if (!countertopPhotoUris.isEmpty()) {
+            detach(photoStatus);
+            page.addView(photoStatus);
+            detach(roomPhoto);
+            page.addView(roomPhoto, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(220)));
+        }
+        addInlineNavigation();
+    }
+
+    private void addCountertopRemovalStep() {
+        hideKeyboard();
+        page.addView(questionTitle("Does Ramsier's remove the old countertop?"));
+        addHelp("Removal is $10.00 per square foot.");
+        RadioGroup choices = yesNoGroup(countertopRemoval);
+        choices.setOnCheckedChangeListener((group, checkedId) -> {
+            countertopRemoval = checkedYes(group, checkedId);
+            if (countertopRemoval && value(removalSquareFeet) <= 0) {
+                removalSquareFeet.setText(number.format(calculateAndDisplay(false).net));
+            }
+        });
+        page.addView(choices);
+        detach(removalSquareFeet);
+        page.addView(removalSquareFeet);
+        addInlineNavigation();
+    }
+
+    private void addQuoteReviewPage() {
+        hideKeyboard();
+        page.addView(questionTitle("Review quote request"));
+        addHelp("Enter the installed price per square foot for this quote.");
+        detach(pricePerSqFt);
+        page.addView(pricePerSqFt);
+        Estimate estimate = calculateAndDisplay(false);
+        addEstimateSummary(estimate);
+        addHelp("This is the first quote. The template worker can add square footage and change the final price later without changing the drawings.");
+        addInlineNavigation();
+    }
+
+    private void addPrintQuotePage() {
+        hideKeyboard();
+        page.addView(questionTitle("Print or save the quote PDF"));
+        addEstimateSummary(calculateAndDisplay(false));
+        Button print = primaryButton("Print / Save PDF");
+        print.setOnClickListener(v -> printQuoteSummary());
+        page.addView(print);
+        addInlineNavigation();
+    }
+
+    private void addTemplateUpdatePage() {
+        hideKeyboard();
+        page.addView(questionTitle("Template update"));
+        addHelp("Enter only extra square footage found at the house. The original drawing remains unchanged.");
+        detach(additionalSquareFeet);
+        page.addView(additionalSquareFeet);
+        if (isBlank(finalPricePerSqFt)) finalPricePerSqFt.setText(number.format(value(pricePerSqFt)));
+        detach(finalPricePerSqFt);
+        page.addView(finalPricePerSqFt);
+        addHelp("The final quote recalculates from these entries.");
+        addInlineNavigation();
+    }
+
+    private void addFinalQuotePage() {
+        hideKeyboard();
+        page.addView(questionTitle("Final quote"));
+        addEstimateSummary(calculateAndDisplay(false));
+        addHelp("Review the completed amount with the customer before collecting a signature.");
+        addInlineNavigation();
+    }
+
+    private void addCustomerSignaturePage() {
+        hideKeyboard();
+        page.addView(questionTitle("Customer signature"));
+        addHelp("The customer signs after the template and final quote are approved. Any later price change requires a new signature.");
+        detach(signaturePad);
+        page.addView(signaturePad, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(230)));
+        Button clear = secondaryButton("Clear signature");
+        clear.setOnClickListener(v -> {
+            signaturePad.clear();
+            customerSigned = false;
+        });
+        page.addView(clear);
+        Button accept = primaryButton(customerSigned ? "Signature accepted" : "Accept customer signature");
+        accept.setOnClickListener(v -> {
+            if (!requireCompleteCustomerName("accepting a customer signature")) return;
+            if (!signaturePad.hasInk()) {
+                Toast.makeText(this, "Ask the customer to sign in the box first.", Toast.LENGTH_LONG).show();
+                return;
+            }
+            customerSigned = true;
+            saveJobSnapshot();
+            Toast.makeText(this, "Customer signature accepted for this final quote.", Toast.LENGTH_LONG).show();
+            showStep();
+        });
+        page.addView(accept);
+        addInlineNavigation();
+    }
+
+    private void addSignedQuotePage() {
+        hideKeyboard();
+        page.addView(questionTitle("Signed quote copy"));
+        addEstimateSummary(calculateAndDisplay(false));
+        addHelp(customerSigned
+                ? "The customer signature has been accepted. Print or save the locked final quote copy."
+                : "Go back and collect the customer's signature before creating the signed quote copy.");
+        Button print = primaryButton("Print / Save signed quote");
+        print.setEnabled(customerSigned);
+        print.setOnClickListener(v -> printQuoteSummary());
+        page.addView(print);
+        addInlineNavigation();
+    }
+
+    private void addCalendarPage(boolean template) {
+        hideKeyboard();
+        String prefix = template ? "TP" : "IN";
+        int color = template ? Color.BLUE : Color.RED;
+        page.addView(questionTitle(prefix + " " + calendarJobName()));
+        addHelp(template
+                ? "The template appointment is marked blue. Review it in Google Calendar before saving."
+                : "The installation appointment is marked red. Review it in Google Calendar before saving.");
+        EditText dateField = template ? templateDateTime : installationDateTime;
+        dateField.setFocusable(false);
+        dateField.setClickable(true);
+        dateField.setOnClickListener(v -> chooseAppointmentDateTime(template));
+        detach(dateField);
+        page.addView(dateField);
+        Button choose = secondaryButton(dateField.getText().toString().trim().isEmpty()
+                ? "Choose date and time"
+                : "Change date and time");
+        choose.setOnClickListener(v -> chooseAppointmentDateTime(template));
+        page.addView(choose);
+        Button calendar = primaryButton("Add to Google Calendar");
+        long appointmentMillis = template ? templateAppointmentMillis : installationAppointmentMillis;
+        calendar.setEnabled(appointmentMillis > 0);
+        calendar.setOnClickListener(v -> openCalendarInsert(
+                prefix + " " + calendarJobName(),
+                color,
+                template ? templateAppointmentMillis : installationAppointmentMillis));
+        page.addView(calendar);
+        if (appointmentMillis <= 0) addHelp("Choose the appointment date and time first.");
+        addInlineNavigation();
+    }
+
+    private void chooseAppointmentDateTime(boolean template) {
+        Calendar selected = Calendar.getInstance();
+        long current = template ? templateAppointmentMillis : installationAppointmentMillis;
+        if (current > 0) {
+            selected.setTimeInMillis(current);
+        } else {
+            selected.add(Calendar.HOUR_OF_DAY, 1);
+            selected.set(Calendar.MINUTE, 0);
+        }
+        DatePickerDialog dateDialog = new DatePickerDialog(
+                this,
+                (datePicker, year, month, day) -> {
+                    selected.set(Calendar.YEAR, year);
+                    selected.set(Calendar.MONTH, month);
+                    selected.set(Calendar.DAY_OF_MONTH, day);
+                    TimePickerDialog timeDialog = new TimePickerDialog(
+                            this,
+                            (timePicker, hour, minute) -> {
+                                selected.set(Calendar.HOUR_OF_DAY, hour);
+                                selected.set(Calendar.MINUTE, minute);
+                                selected.set(Calendar.SECOND, 0);
+                                selected.set(Calendar.MILLISECOND, 0);
+                                long millis = selected.getTimeInMillis();
+                                EditText field = template ? templateDateTime : installationDateTime;
+                                field.setText(new SimpleDateFormat(
+                                        "EEE, MMM d, yyyy 'at' h:mm a",
+                                        Locale.US).format(new Date(millis)));
+                                if (template) templateAppointmentMillis = millis;
+                                else installationAppointmentMillis = millis;
+                                saveJobSnapshot();
+                                showStep();
+                            },
+                            selected.get(Calendar.HOUR_OF_DAY),
+                            selected.get(Calendar.MINUTE),
+                            false);
+                    timeDialog.setTitle("Choose appointment time");
+                    timeDialog.show();
+                },
+                selected.get(Calendar.YEAR),
+                selected.get(Calendar.MONTH),
+                selected.get(Calendar.DAY_OF_MONTH));
+        dateDialog.setTitle("Choose appointment date");
+        dateDialog.getDatePicker().setMinDate(System.currentTimeMillis() - 1000);
+        dateDialog.show();
+    }
+
+    private void addInstallationJobPage() {
+        hideKeyboard();
+        page.addView(questionTitle("Installation job"));
+        TextView summary = label("Job: " + calendarJobName() + "\nAddress: " + text(projectAddress)
+                + "\nFinal square feet: " + number.format(calculateAndDisplay(false).net)
+                + "\nFinal total: " + money(calculateAndDisplay(false).total));
+        summary.setBackgroundColor(Color.WHITE);
+        summary.setPadding(dp(12), dp(12), dp(12), dp(12));
+        page.addView(summary);
+        addHelp("The installer can review the drawings, selections and signed final quote before starting.");
+        addInlineNavigation();
+    }
+
+    private void addJobFinishedPage() {
+        hideKeyboard();
+        page.addView(questionTitle("Is the countertop job finished?"));
+        addHelp("A payment link cannot be created until this is Yes.");
+        RadioGroup choices = yesNoGroup(jobFinished);
+        choices.setOnCheckedChangeListener((group, checkedId) -> jobFinished = checkedYes(group, checkedId));
+        page.addView(choices);
+        addInlineNavigation();
+    }
+
+    private void addCreditPolicyPage() {
+        hideKeyboard();
+        page.addView(questionTitle("Credit-card policy explained?"));
+        addHelp("Ramsier's does not accept debit or prepaid cards for the 3% credit-card option. Card or wallet details must be entered only in Chase or another approved hosted checkout, never in this app.");
+        RadioGroup choices = yesNoGroup(creditCardPolicyAcknowledged);
+        choices.setOnCheckedChangeListener((group, checkedId) -> creditCardPolicyAcknowledged = checkedYes(group, checkedId));
+        page.addView(choices);
+        addInlineNavigation();
+    }
+
+    private void addPaymentMethodPage() {
+        hideKeyboard();
+        page.addView(questionTitle("Payment method"));
+        addHelp("ACH is recommended for a large countertop balance.");
+        RadioGroup choices = new RadioGroup(this);
+        String[] methods = {"ACH bank account", "Paper check", "Eligible credit card or digital wallet through Chase"};
+        for (String method : methods) {
+            RadioButton choice = radioButton(method, method);
+            choice.setChecked(method.equals(paymentMethod));
+            choices.addView(choice);
+        }
+        choices.setOnCheckedChangeListener((group, checkedId) -> {
+            View selected = group.findViewById(checkedId);
+            if (selected != null && selected.getTag() instanceof String) paymentMethod = (String) selected.getTag();
+        });
+        page.addView(choices);
+        addInlineNavigation();
+    }
+
+    private void addStripeAchPage() {
+        hideKeyboard();
+        page.addView(questionTitle("Stripe ACH bank payment"));
+        addHelp("Only the full finished amount and a private quote reference go to Stripe. No name, phone, address, drawing or other customer information is sent.");
+        String phone = customerPhone.getText().toString().trim();
+        String email = customerEmail.getText().toString().trim();
+        addHelp("Saved phone: " + (phone.isEmpty() ? "Not provided" : phone)
+                + "\nSaved email: " + (email.isEmpty() ? "Not provided" : email));
+        long currentAmount = Math.round(calculateAndDisplay(false).total * 100.0);
+        boolean linkReady = !preparedPaymentUrl.isEmpty()
+                && preparedPaymentAmountCents == currentAmount
+                && preparedPaymentImageUri != null
+                && preparedPaymentPdfUri != null;
+        if (!linkReady) {
+            Button payment = primaryButton("Create secure ACH link");
+            payment.setEnabled(jobFinished
+                    && customerSigned
+                    && paymentMethod.startsWith("ACH")
+                    && (!phone.isEmpty() || !email.isEmpty()));
+            payment.setOnClickListener(v -> confirmFinishedAndTextQuote(payment));
+            page.addView(payment);
+        } else {
+            addHelp("The secure ACH link is ready. Review each prepared message and manually tap Send.");
+            if (!phone.isEmpty()) {
+                Button textCustomer = primaryButton("Text " + phone);
+                textCustomer.setOnClickListener(v -> openFinalQuoteMessage(
+                        phone,
+                        calculateAndDisplay(false),
+                        preparedPaymentUrl,
+                        preparedPaymentImageUri));
+                page.addView(textCustomer);
+            }
+            if (!email.isEmpty()) {
+                Button emailCustomer = primaryButton("Email " + email);
+                emailCustomer.setOnClickListener(v -> openFinalQuoteEmail(
+                        email,
+                        calculateAndDisplay(false),
+                        preparedPaymentUrl,
+                        preparedPaymentPdfUri));
+                page.addView(emailCustomer);
+            }
+        }
+        if (!jobFinished) addHelp("Mark Job finished as Yes first.");
+        if (!customerSigned) addHelp("Collect the final quote signature first.");
+        if (phone.isEmpty() && email.isEmpty()) addHelp("Add a phone number or email address before creating the link.");
+        addInlineNavigation();
+    }
+
+    private void addChaseCheckPage() {
+        hideKeyboard();
+        page.addView(questionTitle("Chase check deposit"));
+        addHelp("Enter only the check number here. Write VOID on the retained check after following Chase's instructions. Never photograph or store the routing number, account number or check image in Ramsier's. Use Chase separately with a properly permissioned employee login; this app will not open the full bank account.");
+        detach(checkNumber);
+        page.addView(checkNumber);
+        addInlineNavigation();
+    }
+
+    private void addChaseCreditPage() {
+        hideKeyboard();
+        page.addView(questionTitle("Chase credit-card entry"));
+        addHelp("Do not type or photograph a card in Ramsier's. Use the separate Chase POS payment area with an employee login set to Transact only. That access accepts payments without showing bank balances or banking transactions. Debit and prepaid cards are not eligible for the 3% credit surcharge.");
+        Button setup = secondaryButton("Chase employee-access instructions");
+        setup.setOnClickListener(v -> openWebPage(
+                "https://www.chase.com/business/support/payments/quickaccept/access-and-security"));
+        page.addView(setup);
+        addInlineNavigation();
+    }
+
+    private void addPaymentStatusPage() {
+        hideKeyboard();
+        page.addView(questionTitle("Payment status"));
+        RadioGroup choices = new RadioGroup(this);
+        String[] statuses = {"Not requested", "Pending", "Paid", "Failed", "Returned"};
+        for (String status : statuses) {
+            RadioButton choice = radioButton(status, status);
+            choice.setChecked(status.equals(paymentStatus));
+            choices.addView(choice);
+        }
+        choices.setOnCheckedChangeListener((group, checkedId) -> {
+            View selected = group.findViewById(checkedId);
+            if (selected != null && selected.getTag() instanceof String) {
+                paymentStatus = (String) selected.getTag();
+                saveJobSnapshot();
+            }
+        });
+        page.addView(choices);
+        detach(paymentNotes);
+        page.addView(paymentNotes);
+        addHelp("Stripe or Chase remains the payment authority. A redirect screen alone does not prove payment.");
+        addInlineNavigation();
+    }
+
+    private void addPlumbingNoticePage() {
+        hideKeyboard();
+        page.addView(questionTitle("Customer told Ramsier's does not do plumbing?"));
+        addHelp("Ramsier's does not disconnect, reconnect or perform plumbing work. This statement is also printed on the final quote.");
+        RadioGroup choices = yesNoGroup(plumbingNoticeAcknowledged);
+        choices.setOnCheckedChangeListener((group, checkedId) -> plumbingNoticeAcknowledged = checkedYes(group, checkedId));
+        page.addView(choices);
+        addInlineNavigation();
+    }
+
+    private void addJobHistoryPage() {
+        hideKeyboard();
+        page.addView(questionTitle("Job history"));
+        addHelp("This optional page searches the same phone-local job history as Job search.");
+        detach(jobSearchInput);
+        page.addView(jobSearchInput);
+        Button search = primaryButton("Search saved jobs");
+        search.setOnClickListener(v -> showJobSearchResults(jobSearchInput.getText().toString()));
+        page.addView(search);
+        addInlineNavigation();
+    }
+
+    private void addEstimateSummary(Estimate estimate) {
+        StringBuilder itemized = new StringBuilder();
+        itemized.append("Customer: ").append(customerFullName())
+                .append("\n\nPURCHASED ITEMS\n");
+        for (QuotePdfGenerator.PriceRow row : buildQuotePriceRows(estimate)) {
+            itemized.append("\n• ").append(row.item);
+            if (!row.details.isEmpty()) itemized.append("\n  ").append(row.details);
+            itemized.append("\n  ").append(row.amount);
+        }
+        itemized.append("\n\nFULL QUOTE TOTAL: ").append(money(estimate.total))
+                .append("\n\nPlumbing: Ramsier's does not perform plumbing work");
+        TextView summary = label(itemized.toString());
+        summary.setBackgroundColor(Color.WHITE);
+        summary.setPadding(dp(12), dp(12), dp(12), dp(12));
+        page.addView(summary);
+    }
+
+    private void offerDrawingCrop(List<Uri> drawingUris) {
+        ArrayList<Uri> remaining = new ArrayList<>();
+        for (Uri uri : drawingUris) {
+            if (uri != null && !remaining.contains(uri)) remaining.add(uri);
+        }
+        cropNextDrawing(remaining, new ArrayList<>(), new ArrayList<>(remaining));
+    }
+
+    private void cropNextDrawing(
+            ArrayList<Uri> remaining,
+            ArrayList<Uri> prepared,
+            ArrayList<Uri> originalSources) {
+        if (remaining.isEmpty()) {
+            if (!prepared.isEmpty()) addDrawingPhotos(prepared);
+            for (Uri sourceUri : originalSources) releaseFinishedCropSource(sourceUri);
+            for (Uri croppedUri : prepared) {
+                if (!drawingPhotoUris.contains(croppedUri)) releaseUnusedPhotoUri(croppedUri);
+            }
+            return;
+        }
+        Uri sourceUri = remaining.remove(0);
+        showDrawingCropDialog(sourceUri, resultUri -> {
+            if (resultUri != null) prepared.add(resultUri);
+            cropNextDrawing(remaining, prepared, originalSources);
+        });
+    }
+
+    private void releaseFinishedCropSource(Uri sourceUri) {
+        if (sourceUri == null
+                || drawingPhotoUris.contains(sourceUri)
+                || countertopPhotoUris.contains(sourceUri)
+                || sourceUri.equals(selectedPhotoUri)
+                || sourceUri.equals(pendingDrawingCaptureUri)) return;
+        DrawingCropSourcePolicy.CleanupAction action = DrawingCropSourcePolicy.cleanupAction(
+                sourceUri.toString(),
+                getPackageName() + ".fileprovider");
+        try {
+            if (action == DrawingCropSourcePolicy.CleanupAction.DELETE_APP_TEMPORARY) {
+                getContentResolver().delete(sourceUri, null, null);
+            } else if (action
+                    == DrawingCropSourcePolicy.CleanupAction.RELEASE_PERSISTED_READ_GRANT) {
+                getContentResolver().releasePersistableUriPermission(
+                        sourceUri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            }
+        } catch (Exception ignored) {
+            // A failed camera capture may already be gone, and some pickers grant only once.
+        }
+    }
+
+    private void showDrawingCropDialog(Uri sourceUri, DrawingCropCallback callback) {
+        final Bitmap source;
+        try {
+            source = decodeDrawingBitmap(sourceUri, 2400);
+        } catch (Exception exception) {
+            Toast.makeText(
+                    this,
+                    "This drawing could not be opened for cropping.",
+                    Toast.LENGTH_LONG).show();
+            callback.finished(null);
+            return;
+        }
+
+        final Bitmap[] workingSource = {source};
+        DrawingCropPreviewView preview = new DrawingCropPreviewView(this, workingSource[0]);
+        preview.setContentDescription(
+                "Drawing crop preview. Darkened edges will be removed before AI analysis.");
+        LinearLayout controls = new LinearLayout(this);
+        controls.setOrientation(LinearLayout.VERTICAL);
+        controls.setPadding(dp(10), 0, dp(10), dp(2));
+        TextView cropHelp = label(
+                "Trim only the background. A 3% safety edge keeps numbers, lines, and arrows from being cut off.");
+        cropHelp.setTextSize(13);
+        cropHelp.setPadding(dp(2), dp(2), dp(2), dp(2));
+        controls.addView(cropHelp);
+        LinearLayout.LayoutParams cropPreviewParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                0,
+                1f);
+        cropPreviewParams.setMargins(0, dp(2), 0, dp(2));
+        controls.addView(preview, cropPreviewParams);
+
+        LinearLayout rotateRow = new LinearLayout(this);
+        rotateRow.setOrientation(LinearLayout.HORIZONTAL);
+        rotateRow.setGravity(Gravity.CENTER);
+        Button rotateLeft = cropActionButton("Rotate left", false);
+        Button rotateRight = cropActionButton("Rotate right", false);
+        LinearLayout.LayoutParams rotateLeftParams = new LinearLayout.LayoutParams(
+                0,
+                dp(48),
+                1f);
+        rotateLeftParams.setMargins(0, dp(2), dp(3), dp(2));
+        LinearLayout.LayoutParams rotateRightParams = new LinearLayout.LayoutParams(
+                0,
+                dp(48),
+                1f);
+        rotateRightParams.setMargins(dp(3), dp(2), 0, dp(2));
+        rotateRow.addView(rotateLeft, rotateLeftParams);
+        rotateRow.addView(rotateRight, rotateRightParams);
+        controls.addView(rotateRow);
+
+        LinearLayout firstTrimRow = cropControlRow();
+        LinearLayout leftControl = cropControlCell();
+        LinearLayout topControl = cropControlCell();
+        SeekBar left = cropSeekBar("Trim left", leftControl, preview, 0);
+        SeekBar top = cropSeekBar("Trim top", topControl, preview, 1);
+        addCropControlCell(firstTrimRow, leftControl, false);
+        addCropControlCell(firstTrimRow, topControl, true);
+        controls.addView(firstTrimRow);
+
+        LinearLayout secondTrimRow = cropControlRow();
+        LinearLayout rightControl = cropControlCell();
+        LinearLayout bottomControl = cropControlCell();
+        SeekBar right = cropSeekBar("Trim right", rightControl, preview, 2);
+        SeekBar bottom = cropSeekBar("Trim bottom", bottomControl, preview, 3);
+        addCropControlCell(secondTrimRow, rightControl, false);
+        addCropControlCell(secondTrimRow, bottomControl, true);
+        controls.addView(secondTrimRow);
+
+        View.OnClickListener rotateDrawing = button -> {
+            float degrees = button == rotateLeft ? -90 : 90;
+            Bitmap rotated = rotateDrawingBitmap(workingSource[0], degrees);
+            if (rotated == null) {
+                Toast.makeText(this, "The drawing could not be rotated.", Toast.LENGTH_LONG).show();
+                return;
+            }
+            if (workingSource[0] != rotated) workingSource[0].recycle();
+            workingSource[0] = rotated;
+            preview.setSource(rotated);
+            left.setProgress(0);
+            top.setProgress(0);
+            right.setProgress(0);
+            bottom.setProgress(0);
+        };
+        rotateLeft.setOnClickListener(rotateDrawing);
+        rotateRight.setOnClickListener(rotateDrawing);
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(Color.rgb(248, 246, 243));
+
+        TextView title = new TextView(this);
+        title.setText("Crop drawing before AI");
+        title.setTextSize(18);
+        title.setTextColor(Color.rgb(49, 44, 40));
+        title.setTypeface(Typeface.DEFAULT_BOLD);
+        title.setPadding(dp(14), dp(8), dp(14), dp(4));
+        root.addView(title, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+        root.addView(controls, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                0,
+                1f));
+
+        LinearLayout footer = new LinearLayout(this);
+        footer.setOrientation(LinearLayout.HORIZONTAL);
+        footer.setGravity(Gravity.CENTER_VERTICAL);
+        footer.setPadding(dp(5), dp(3), dp(5), dp(4));
+        footer.setBackgroundColor(Color.WHITE);
+        Button useCrop = cropActionButton("Use crop", true);
+        LinearLayout.LayoutParams useCropParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(48));
+        useCropParams.setMargins(dp(2), 0, dp(2), 0);
+        footer.addView(useCrop, useCropParams);
+        root.addView(footer, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        final boolean[] completed = {false};
+        Dialog dialog = new Dialog(this);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setContentView(root);
+        useCrop.setOnClickListener(button -> {
+            Uri cropped = saveCroppedDrawing(
+                    workingSource[0],
+                    left.getProgress(),
+                    top.getProgress(),
+                    right.getProgress(),
+                    bottom.getProgress());
+            if (cropped == null) {
+                Toast.makeText(
+                        this,
+                        "The cropped drawing could not be saved.",
+                        Toast.LENGTH_LONG).show();
+                return;
+            }
+            completed[0] = true;
+            dialog.dismiss();
+            callback.finished(cropped);
+        });
+        dialog.setOnCancelListener(ignored -> {
+            if (!completed[0]) {
+                completed[0] = true;
+                callback.finished(null);
+            }
+        });
+        dialog.setOnDismissListener(ignored -> {
+            if (workingSource[0] != null && !workingSource[0].isRecycled()) {
+                workingSource[0].recycle();
+            }
+        });
+        dialog.show();
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new ColorDrawable(Color.rgb(248, 246, 243)));
+            int availableHeight = getResources().getDisplayMetrics().heightPixels;
+            window.setLayout(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    Math.max(dp(520), (int) (availableHeight * 0.90f)));
+        }
+    }
+
+    private Button cropActionButton(String text, boolean primary) {
+        Button button = new Button(this);
+        button.setText(text);
+        button.setAllCaps(false);
+        button.setTextSize(12);
+        button.setMinHeight(dp(48));
+        button.setTextColor(primary ? Color.WHITE : Color.rgb(91, 58, 41));
+        button.setBackgroundColor(primary
+                ? Color.rgb(188, 137, 67)
+                : Color.rgb(239, 230, 220));
+        return button;
+    }
+
+    private Bitmap rotateDrawingBitmap(Bitmap source, float degrees) {
+        if (source == null || source.isRecycled()) return null;
+        try {
+            Matrix matrix = new Matrix();
+            matrix.setRotate(degrees);
+            return Bitmap.createBitmap(
+                    source,
+                    0,
+                    0,
+                    source.getWidth(),
+                    source.getHeight(),
+                    matrix,
+                    true);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private SeekBar cropSeekBar(
+            String title,
+            LinearLayout controls,
+            DrawingCropPreviewView preview,
+            int edge) {
+        TextView heading = label(title + ": 0%");
+        heading.setTypeface(Typeface.DEFAULT_BOLD);
+        heading.setTextSize(13);
+        heading.setSingleLine(true);
+        heading.setPadding(dp(3), dp(1), dp(3), 0);
+        controls.addView(heading);
+        SeekBar seekBar = new SeekBar(this);
+        seekBar.setMax(DrawingCropMath.MAXIMUM_TRIM_PERCENT);
+        seekBar.setProgress(0);
+        seekBar.setContentDescription(title);
+        seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar bar, int value, boolean fromUser) {
+                heading.setText(title + ": " + value + "%");
+                int removed = DrawingCropMath.effectiveTrimPercent(value);
+                bar.setContentDescription(
+                        title + ": " + value + " percent selected; " + removed
+                                + " percent removed after the safety edge");
+                preview.setTrim(edge, value);
+            }
+
+            @Override public void onStartTrackingTouch(SeekBar bar) {}
+            @Override public void onStopTrackingTouch(SeekBar bar) {}
+        });
+        controls.addView(seekBar, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(48)));
+        return seekBar;
+    }
+
+    private LinearLayout cropControlRow() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        return row;
+    }
+
+    private LinearLayout cropControlCell() {
+        LinearLayout cell = new LinearLayout(this);
+        cell.setOrientation(LinearLayout.VERTICAL);
+        cell.setPadding(dp(1), 0, dp(1), 0);
+        return cell;
+    }
+
+    private void addCropControlCell(
+            LinearLayout row,
+            LinearLayout cell,
+            boolean rightColumn) {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                0,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                1f);
+        params.setMargins(
+                rightColumn ? dp(3) : 0,
+                0,
+                rightColumn ? 0 : dp(3),
+                0);
+        row.addView(cell, params);
+    }
+
+    private Uri saveCroppedDrawing(
+            Bitmap source,
+            int leftPercent,
+            int topPercent,
+            int rightPercent,
+            int bottomPercent) {
+        Bitmap cropped = null;
+        try {
+            int[] crop = DrawingCropMath.bounds(
+                    source.getWidth(),
+                    source.getHeight(),
+                    leftPercent,
+                    topPercent,
+                    rightPercent,
+                    bottomPercent);
+            cropped = Bitmap.createBitmap(source, crop[0], crop[1], crop[2], crop[3]);
+            File drawingDirectory = new File(getFilesDir(), "drawing_photos");
+            if (!drawingDirectory.exists() && !drawingDirectory.mkdirs()) return null;
+            File drawingFile = new File(
+                    drawingDirectory,
+                    "cropped-drawing-" + System.currentTimeMillis() + ".jpg");
+            try (java.io.FileOutputStream output = new java.io.FileOutputStream(drawingFile)) {
+                if (!cropped.compress(Bitmap.CompressFormat.JPEG, 95, output)) return null;
+            }
+            return FileProvider.getUriForFile(
+                    this,
+                    getPackageName() + ".fileprovider",
+                    drawingFile);
+        } catch (Exception ignored) {
+            return null;
+        } finally {
+            if (cropped != null && cropped != source) cropped.recycle();
+        }
+    }
+
+    private void selectDrawing(int index) {
+        if (drawingPhotoUris.isEmpty()) return;
+        syncActiveDrawingRecord();
+        activeDrawingIndex = Math.max(0, Math.min(index, drawingPhotoUris.size() - 1));
+        loadActiveDrawingResult(true);
+        persistDrawingState();
+        updateActiveDrawingPreview();
+        showStep();
+    }
+
+    private void addDrawingPhotos(List<Uri> newDrawingUris) {
+        syncActiveDrawingRecord();
+        int originalCount = drawingPhotoUris.size();
+        boolean omittedForLimit = false;
+        for (Uri uri : newDrawingUris) {
+            if (uri == null || drawingPhotoUris.contains(uri)) continue;
+            if (drawingPhotoUris.size() >= MAX_DRAWING_PHOTOS) {
+                omittedForLimit = true;
+                break;
+            }
+            drawingPhotoUris.add(uri);
+            drawingRecords.add(DrawingRecord.empty(uri.toString()));
+        }
+        if (drawingPhotoUris.size() == originalCount) {
+            Toast.makeText(
+                    this,
+                    originalCount >= MAX_DRAWING_PHOTOS
+                            ? "The maximum of " + MAX_DRAWING_PHOTOS + " drawings is already selected."
+                            : "Those drawings are already selected.",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        cancelDrawingAnalysis();
+        drawingInputRevision++;
+        activeDrawingIndex = drawingPhotoUris.size() - 1;
+        loadActiveDrawingResult(true);
+        dismissDrawingDialogs();
+        updateActiveDrawingPreview();
+        drawingStatus.setText(drawingPhotoUris.size() + " drawing"
+                + (drawingPhotoUris.size() == 1 ? " is" : "s are")
+                + " ready. AI is starting automatically.");
+        photoAccordionOpen = 2;
+        persistDrawingState();
+        calculateAndDisplay(false);
+        showStep();
+        if (omittedForLimit) {
+            Toast.makeText(
+                    this,
+                    "Only the first " + MAX_DRAWING_PHOTOS + " drawings were added.",
+                    Toast.LENGTH_LONG).show();
+        }
+        analyzeDrawing();
+    }
+
+    private void removeDrawing(int index) {
+        if (index < 0 || index >= drawingPhotoUris.size()) return;
+        syncActiveDrawingRecord();
+        cancelDrawingAnalysis();
+        Uri removedDrawingUri = drawingPhotoUris.remove(index);
+        if (index < drawingRecords.size()) drawingRecords.remove(index);
+        drawingInputRevision++;
+        activeDrawingIndex = Math.max(
+                0,
+                Math.min(index, drawingPhotoUris.size() - 1));
+        loadActiveDrawingResult(true);
+        dismissDrawingDialogs();
+        updateActiveDrawingPreview();
+        if (drawingPhotoUris.isEmpty()) {
+            drawingStatus.setText("No countertop drawing selected.");
+        } else if (hasActiveDrawingResult()) {
+            updateDrawingStatusText();
+        } else {
+            drawingStatus.setText(drawingPhotoUris.size() + " drawing"
+                    + (drawingPhotoUris.size() == 1 ? " is" : "s are")
+                    + " ready. Run AI for the drawings that do not have an estimate.");
+        }
+        releaseUnusedPhotoUri(removedDrawingUri);
+        persistDrawingState();
+        calculateAndDisplay(false);
+        showStep();
+    }
+
+    private void confirmClearDrawings() {
+        if (drawingPhotoUris.isEmpty()) return;
+        new AlertDialog.Builder(this)
+                .setTitle("Clear all drawings?")
+                .setMessage("This removes all selected drawings, saved camera copies, and AI results. Gallery originals stay on your phone.")
+                .setPositiveButton("Clear", (dialog, which) -> clearAllDrawings())
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void clearAllDrawings() {
+        cancelDrawingAnalysis();
+        clearAiDrawingResult();
+        ArrayList<Uri> removedDrawingUris = new ArrayList<>(drawingPhotoUris);
+        drawingPhotoUris.clear();
+        drawingRecords.clear();
+        pendingDrawingCaptureUri = null;
+        displayedDrawingPreviewUri = null;
+        activeDrawingIndex = 0;
+        drawingInputRevision++;
+        dismissDrawingDialogs();
+        drawingPhoto.setImageDrawable(null);
+        drawingStatus.setText("No countertop drawing selected.");
+        for (Uri uri : removedDrawingUris) releaseUnusedPhotoUri(uri);
+        persistDrawingState();
+        calculateAndDisplay(false);
+        showStep();
+    }
+
+    private void dismissDrawingDialogs() {
+        if (drawingZoomDialog != null) {
+            drawingZoomDialog.dismiss();
+            drawingZoomDialog = null;
+        }
+        if (drawingEditDialog != null) {
+            drawingEditDialog.dismiss();
+            drawingEditDialog = null;
+        }
+    }
+
+    private void updateActiveDrawingPreview() {
+        if (drawingPhotoUris.isEmpty()) {
+            drawingPhoto.setImageDrawable(null);
+            displayedDrawingPreviewUri = null;
+            return;
+        }
+        activeDrawingIndex = Math.max(
+                0,
+                Math.min(activeDrawingIndex, drawingPhotoUris.size() - 1));
+        Uri activeDrawingUri = drawingPhotoUris.get(activeDrawingIndex);
+        if (!activeDrawingUri.equals(displayedDrawingPreviewUri)
+                || drawingPhoto.getDrawable() == null) {
+            loadDrawingIntoImageView(drawingPhoto, activeDrawingUri, 1400);
+            displayedDrawingPreviewUri = drawingPhoto.getDrawable() == null
+                    ? null
+                    : activeDrawingUri;
+        }
+        drawingPhoto.setContentDescription(
+                "Original countertop drawing " + (activeDrawingIndex + 1)
+                        + " of " + drawingPhotoUris.size() + ". Tap to compare and zoom.");
+    }
+
+    private void loadDrawingIntoImageView(ImageView imageView, Uri uri, int maximumSide) {
+        clearDecodedDrawing(imageView);
+        try {
+            imageView.setImageBitmap(decodeDrawingBitmap(uri, maximumSide));
+        } catch (Exception exception) {
+            imageView.setImageDrawable(null);
+            Toast.makeText(this, "One drawing photo could not be displayed.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void clearDecodedDrawing(ImageView imageView) {
+        if (imageView == null) return;
+        // Attached bitmaps can still be referenced by RenderThread after the view is cleared.
+        // Let the runtime reclaim them instead of recycling them while a display list may exist.
+        imageView.setImageDrawable(null);
+    }
+
+    private Bitmap decodeDrawingBitmap(Uri uri, int maximumSide) throws Exception {
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        try (InputStream input = getContentResolver().openInputStream(uri)) {
+            if (input == null) throw new IllegalStateException("The drawing photo could not be read.");
+            BitmapFactory.decodeStream(input, null, bounds);
+        }
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+            throw new IllegalStateException("The drawing photo could not be read.");
+        }
+        int sampleSize = 1;
+        int largestSide = Math.max(bounds.outWidth, bounds.outHeight);
+        while (largestSide / sampleSize > maximumSide * 3 / 2) sampleSize *= 2;
+        BitmapFactory.Options options = new BitmapFactory.Options();
+        options.inSampleSize = sampleSize;
+        Bitmap decoded;
+        try (InputStream input = getContentResolver().openInputStream(uri)) {
+            if (input == null) throw new IllegalStateException("The drawing photo could not be read.");
+            decoded = BitmapFactory.decodeStream(input, null, options);
+        }
+        if (decoded == null) throw new IllegalStateException("The drawing photo could not be read.");
+        decoded = applyDrawingOrientation(uri, decoded);
+        int largestDecodedSide = Math.max(decoded.getWidth(), decoded.getHeight());
+        if (largestDecodedSide <= maximumSide) return decoded;
+        double scale = (double) maximumSide / largestDecodedSide;
+        Bitmap scaled = Bitmap.createScaledBitmap(
+                decoded,
+                Math.max(1, (int) Math.round(decoded.getWidth() * scale)),
+                Math.max(1, (int) Math.round(decoded.getHeight() * scale)),
+                true);
+        if (scaled != decoded) decoded.recycle();
+        return scaled;
+    }
+
+    private Bitmap applyDrawingOrientation(Uri uri, Bitmap bitmap) {
+        int orientation = ExifInterface.ORIENTATION_NORMAL;
+        try (InputStream input = getContentResolver().openInputStream(uri)) {
+            if (input != null) {
+                orientation = new ExifInterface(input).getAttributeInt(
+                        ExifInterface.TAG_ORIENTATION,
+                        ExifInterface.ORIENTATION_NORMAL);
+            }
+        } catch (Exception ignored) {
+        }
+
+        Matrix matrix = new Matrix();
+        switch (orientation) {
+            case ExifInterface.ORIENTATION_FLIP_HORIZONTAL:
+                matrix.setScale(-1, 1);
+                break;
+            case ExifInterface.ORIENTATION_ROTATE_180:
+                matrix.setRotate(180);
+                break;
+            case ExifInterface.ORIENTATION_FLIP_VERTICAL:
+                matrix.setScale(1, -1);
+                break;
+            case ExifInterface.ORIENTATION_TRANSPOSE:
+                matrix.setRotate(90);
+                matrix.postScale(-1, 1);
+                break;
+            case ExifInterface.ORIENTATION_ROTATE_90:
+                matrix.setRotate(90);
+                break;
+            case ExifInterface.ORIENTATION_TRANSVERSE:
+                matrix.setRotate(-90);
+                matrix.postScale(-1, 1);
+                break;
+            case ExifInterface.ORIENTATION_ROTATE_270:
+                matrix.setRotate(-90);
+                break;
+            default:
+                return bitmap;
+        }
+
+        try {
+            Bitmap corrected = Bitmap.createBitmap(
+                    bitmap,
+                    0,
+                    0,
+                    bitmap.getWidth(),
+                    bitmap.getHeight(),
+                    matrix,
+                    true);
+            if (corrected != bitmap) bitmap.recycle();
+            return corrected;
+        } catch (Exception ignored) {
+            return bitmap;
+        }
+    }
+
+    private boolean isReadableDrawingUri(Uri uri) {
+        if (uri == null) return false;
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        try (InputStream input = getContentResolver().openInputStream(uri)) {
+            if (input == null) return false;
+            BitmapFactory.decodeStream(input, null, bounds);
+            return bounds.outWidth > 0 && bounds.outHeight > 0;
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
     private void takeDrawingPhoto() {
+        if (drawingPhotoUris.size() >= MAX_DRAWING_PHOTOS) {
+            Toast.makeText(
+                    this,
+                    "You can use up to " + MAX_DRAWING_PHOTOS + " drawings at one time.",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
         requestCameraCapture(CAMERA_CAPTURE_DRAWING);
     }
 
@@ -2154,22 +4666,22 @@ public class MainActivity extends Activity {
 
     private void openDrawingCamera() {
         try {
-            File drawingDirectory = new File(getCacheDir(), "drawing_photos");
+            File drawingDirectory = new File(getFilesDir(), "drawing_photos");
             if (!drawingDirectory.exists() && !drawingDirectory.mkdirs()) {
                 throw new IllegalStateException("Could not create drawing photo folder");
             }
             File drawingFile = new File(
                     drawingDirectory,
                     "countertop-drawing-" + System.currentTimeMillis() + ".jpg");
-            drawingPhotoUri = FileProvider.getUriForFile(
+            pendingDrawingCaptureUri = FileProvider.getUriForFile(
                     this,
                     getPackageName() + ".fileprovider",
                     drawingFile);
             Intent camera = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
-            camera.putExtra(MediaStore.EXTRA_OUTPUT, drawingPhotoUri);
+            camera.putExtra(MediaStore.EXTRA_OUTPUT, pendingDrawingCaptureUri);
             camera.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-            camera.setClipData(ClipData.newUri(getContentResolver(), "Countertop drawing", drawingPhotoUri));
-            grantCameraUriPermissions(camera, drawingPhotoUri);
+            camera.setClipData(ClipData.newUri(getContentResolver(), "Countertop drawing", pendingDrawingCaptureUri));
+            grantCameraUriPermissions(camera, pendingDrawingCaptureUri);
             startActivityForResult(camera, TAKE_DRAWING_PHOTO);
         } catch (Exception e) {
             openDrawingCameraWithoutFileOutput();
@@ -2187,7 +4699,7 @@ public class MainActivity extends Activity {
     }
 
     private void openDrawingCameraWithoutFileOutput() {
-        drawingPhotoUri = null;
+        pendingDrawingCaptureUri = null;
         try {
             Intent camera = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
             startActivityForResult(camera, TAKE_DRAWING_PHOTO);
@@ -2236,116 +4748,280 @@ public class MainActivity extends Activity {
         if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
             openRequestedCamera();
         } else {
+            pendingCameraCapture = 0;
             Toast.makeText(this, "Allow camera access to take photos.", Toast.LENGTH_LONG).show();
         }
     }
 
     private void analyzeDrawing() {
-        if (drawingPhotoUri == null) {
-            Toast.makeText(this, "Take or choose a countertop drawing first.", Toast.LENGTH_LONG).show();
+        analyzeDrawing(false, null);
+    }
+
+    private void analyzeActiveDrawing(boolean enhanced) {
+        if (activeDrawingIndex < 0 || activeDrawingIndex >= drawingPhotoUris.size()) return;
+        analyzeDrawing(enhanced, drawingPhotoUris.get(activeDrawingIndex));
+    }
+
+    private void analyzeDrawing(boolean enhanced, Uri forcedDrawingUri) {
+        if (drawingPhotoUris.isEmpty()) {
+            Toast.makeText(this, "Take or choose at least one countertop drawing first.", Toast.LENGTH_LONG).show();
             return;
         }
         if (drawingAnalysisInProgress) return;
+        if (DrawingEndpointAuthPolicy.requiresDeviceAuthentication(DRAWING_AI_ENDPOINT)
+                && drawingDeviceCredentialStore.load() == null) {
+            Toast.makeText(this, DRAWING_AI_NOT_CONNECTED_ERROR, Toast.LENGTH_LONG).show();
+            return;
+        }
 
-        clearAiDrawingResult();
+        syncActiveDrawingRecord();
+        final ArrayList<Uri> requestDrawingUris = new ArrayList<>();
+        final HashMap<String, DrawingRecord> previousRecordsByUri = new HashMap<>();
+        for (int i = 0; i < drawingPhotoUris.size(); i++) {
+            DrawingRecord drawing = i < drawingRecords.size() ? drawingRecords.get(i) : null;
+            if (drawing != null) {
+                previousRecordsByUri.put(drawingPhotoUris.get(i).toString(), drawing);
+            }
+            boolean forced = forcedDrawingUri != null
+                    && forcedDrawingUri.equals(drawingPhotoUris.get(i));
+            if (forced || (forcedDrawingUri == null
+                    && (drawing == null || !drawing.hasResult() || !drawing.lastError.isEmpty()))) {
+                requestDrawingUris.add(drawingPhotoUris.get(i));
+            }
+        }
+        if (requestDrawingUris.isEmpty()) return;
+        final int requestRevision = drawingInputRevision;
         final int requestId = ++drawingAnalysisRequestId;
         startDrawingProgress(requestId);
-        drawingStatus.setText("AI is working on the drawing...");
+        drawingStatus.setText((enhanced ? "Enhanced AI" : "AI")
+                + " is checking drawing 1 of " + requestDrawingUris.size() + "...");
         showStep();
 
         new Thread(() -> {
-            HttpURLConnection connection = null;
-            try {
-                postDrawingProgress(requestId, 15, "Preparing drawing");
-                String image = drawingImageDataUrl();
-                if (requestId != drawingAnalysisRequestId) return;
-                postDrawingProgress(requestId, 25, "Uploading drawing");
-                connection = (HttpURLConnection) new URL(DRAWING_AI_ENDPOINT).openConnection();
-                synchronized (drawingConnectionLock) {
-                    if (requestId != drawingAnalysisRequestId) {
-                        connection.disconnect();
-                        return;
-                    }
-                    activeDrawingConnection = connection;
-                }
-                connection.setRequestMethod("POST");
-                connection.setConnectTimeout(30000);
-                connection.setReadTimeout(120000);
-                connection.setDoOutput(true);
-                connection.setRequestProperty("Content-Type", "application/json");
-                connection.setRequestProperty("X-Ramsiers-App", "countertop-quote-v1");
-
-                JSONObject request = new JSONObject();
-                request.put("image", image);
-                request.put("include_verification_drawing", true);
-                byte[] requestBytes = request.toString().getBytes(StandardCharsets.UTF_8);
-                boolean canUpload;
-                synchronized (drawingConnectionLock) {
-                    canUpload = requestId == drawingAnalysisRequestId
-                            && activeDrawingConnection == connection;
-                }
-                if (!canUpload) return;
-                try (java.io.OutputStream outputStream = connection.getOutputStream()) {
-                    synchronized (drawingConnectionLock) {
-                        canUpload = requestId == drawingAnalysisRequestId
-                                && activeDrawingConnection == connection;
-                    }
-                    if (!canUpload) return;
-                    outputStream.write(requestBytes);
-                }
-                postDrawingProgress(requestId, 30, "AI is reading measurements");
-
-                int responseCode = connection.getResponseCode();
-                InputStream responseStream = responseCode >= 200 && responseCode < 300
-                        ? connection.getInputStream()
-                        : connection.getErrorStream();
-                JSONObject response = new JSONObject(readText(responseStream));
-                if (responseCode < 200 || responseCode >= 300) {
-                    throw new IllegalStateException(
-                            response.optString("error", "The drawing could not be analyzed."));
-                }
-
-                double squareFeet = response.optDouble("square_feet", 0);
-                boolean canCalculate = response.optBoolean(
-                        "can_calculate",
-                        squareFeet > 0);
-                String confidence = response.optString("confidence", "low");
-                String explanation = response.optString("explanation", "");
-                String missingInformation = response.optString("missing_information", "");
-                JSONArray calculationParts = response.optJSONArray("calculation_parts");
-                JSONObject verificationDrawing = response.optJSONObject("verification_drawing");
-                runOnUiThread(() -> {
-                    if (requestId != drawingAnalysisRequestId) return;
-                    showDrawingResult(
+            int failureCount = 0;
+            Uri firstTimedOutDrawing = null;
+            for (int i = 0; i < requestDrawingUris.size(); i++) {
+                if (requestId != drawingAnalysisRequestId
+                        || requestRevision != drawingInputRevision) return;
+                Uri uri = requestDrawingUris.get(i);
+                int drawingNumber = i + 1;
+                try {
+                    DrawingRecord result = requestSingleDrawingAnalysis(
+                            uri,
                             requestId,
-                            canCalculate,
-                            squareFeet,
-                            confidence,
-                            explanation,
-                            missingInformation,
-                            calculationParts,
-                            verificationDrawing);
-                });
-            } catch (Exception e) {
-                String message = e.getMessage() == null
-                        ? "The drawing could not be analyzed. Please try again."
-                        : e.getMessage();
-                runOnUiThread(() -> {
-                    if (requestId != drawingAnalysisRequestId) return;
-                    drawingStatus.setText(message);
-                    failDrawingProgress(requestId);
-                });
-            } finally {
-                if (connection != null) {
-                    connection.disconnect();
-                    synchronized (drawingConnectionLock) {
-                        if (activeDrawingConnection == connection) {
-                            activeDrawingConnection = null;
-                        }
+                            requestRevision,
+                            drawingNumber,
+                            requestDrawingUris.size(),
+                            enhanced);
+                    if (enhanced) {
+                        result = DrawingRetryPolicy.preferMoreUseful(
+                                previousRecordsByUri.get(uri.toString()),
+                                result);
                     }
+                    DrawingRecord resultToStore = result;
+                    runOnUiThread(() -> storeDrawingResult(uri, resultToStore));
+                } catch (Exception exception) {
+                    if (requestId != drawingAnalysisRequestId
+                            || requestRevision != drawingInputRevision) return;
+                    failureCount++;
+                    String message = exception.getMessage() == null
+                            ? "The drawing could not be analyzed. Please try again."
+                            : exception.getMessage();
+                    boolean timedOut = DrawingAnalysisFailurePolicy.isTimeout(exception, message);
+                    if (firstTimedOutDrawing == null && timedOut) {
+                        firstTimedOutDrawing = uri;
+                    }
+                    DrawingRecord previous = previousRecordsByUri.get(uri.toString());
+                    if (previous == null) previous = DrawingRecord.empty(uri.toString());
+                    DrawingRecord failed = previous.withError(message);
+                    runOnUiThread(() -> storeDrawingResult(uri, failed));
+                    if (timedOut) break;
                 }
             }
+            final int completedFailureCount = failureCount;
+            final Uri completedTimedOutDrawing = firstTimedOutDrawing;
+            runOnUiThread(() -> finishDrawingBatch(
+                    requestId,
+                    requestRevision,
+                    completedFailureCount,
+                    completedTimedOutDrawing));
         }).start();
+    }
+
+    private DrawingRecord requestSingleDrawingAnalysis(
+            Uri drawingUri,
+            int requestId,
+            int requestRevision,
+            int drawingNumber,
+            int drawingCount,
+            boolean enhanced) throws Exception {
+        boolean requiresDeviceAuthentication =
+                DrawingEndpointAuthPolicy.requiresDeviceAuthentication(DRAWING_AI_ENDPOINT);
+        DrawingDeviceCredential drawingCredential = requiresDeviceAuthentication
+                ? drawingDeviceCredentialStore.load()
+                : null;
+        if (requiresDeviceAuthentication && drawingCredential == null) {
+            throw new IllegalStateException(DRAWING_AI_NOT_CONNECTED_ERROR);
+        }
+        postDrawingProgress(
+                requestId,
+                5 + (int) Math.round(80.0 * (drawingNumber - 1) / drawingCount),
+                "Preparing drawing " + drawingNumber + " of " + drawingCount);
+        String image = drawingImageDataUrl(drawingUri, enhanced);
+        if (requestId != drawingAnalysisRequestId
+                || requestRevision != drawingInputRevision) {
+            throw new IllegalStateException("Drawing analysis was canceled.");
+        }
+
+        HttpURLConnection connection = (HttpURLConnection) new URL(DRAWING_AI_ENDPOINT).openConnection();
+        AtomicBoolean requestDeadlineExceeded = new AtomicBoolean(false);
+        Runnable requestDeadline = () -> {
+            boolean disconnect;
+            synchronized (drawingConnectionLock) {
+                disconnect = activeDrawingConnection == connection;
+                if (disconnect) requestDeadlineExceeded.set(true);
+            }
+            if (disconnect) connection.disconnect();
+        };
+        drawingProgressHandler.postDelayed(requestDeadline, DRAWING_HTTP_DEADLINE_MILLIS);
+        try {
+            synchronized (drawingConnectionLock) {
+                if (requestId != drawingAnalysisRequestId
+                        || requestRevision != drawingInputRevision) {
+                    connection.disconnect();
+                    throw new IllegalStateException("Drawing analysis was canceled.");
+                }
+                activeDrawingConnection = connection;
+            }
+            connection.setRequestMethod("POST");
+            connection.setConnectTimeout(30000);
+            // The service stops model work at 90 seconds. Keep only a small transport margin so
+            // a broken gateway cannot leave the phone waiting at 90% for four minutes.
+            connection.setReadTimeout(DRAWING_HTTP_DEADLINE_MILLIS);
+            connection.setDoOutput(true);
+            connection.setInstanceFollowRedirects(false);
+            connection.setChunkedStreamingMode(8192);
+            connection.setRequestProperty("Content-Type", "application/json");
+            connection.setRequestProperty("X-Ramsiers-App", "countertop-quote-v1");
+            if (requiresDeviceAuthentication) {
+                connection.setRequestProperty(
+                        "X-Ramsiers-Device",
+                        drawingCredential.deviceId());
+                connection.setRequestProperty(
+                        "Authorization",
+                        "Bearer " + drawingCredential.token());
+            }
+
+            JSONObject request = DrawingApiRequest.singleImage(image);
+            postDrawingProgress(
+                    requestId,
+                    10 + (int) Math.round(80.0 * (drawingNumber - 1) / drawingCount),
+                    "Uploading drawing " + drawingNumber + " of " + drawingCount);
+            try (java.io.OutputStream outputStream = connection.getOutputStream();
+                 java.io.OutputStreamWriter writer = new java.io.OutputStreamWriter(
+                         outputStream,
+                         StandardCharsets.UTF_8)) {
+                writer.write(request.toString());
+            }
+            postDrawingProgress(
+                    requestId,
+                    15 + (int) Math.round(80.0 * (drawingNumber - 1) / drawingCount),
+                    "Reading drawing " + drawingNumber + " of " + drawingCount);
+
+            int responseCode = connection.getResponseCode();
+            if (responseCode == HttpURLConnection.HTTP_UNAUTHORIZED) {
+                throw new IllegalStateException(DRAWING_AI_INVALID_CONNECTION_ERROR);
+            }
+            if (DrawingAnalysisFailurePolicy.isTimeoutHttpStatus(responseCode)) {
+                throw new SocketTimeoutException("Drawing AI took too long to respond.");
+            }
+            InputStream responseStream = responseCode >= 200 && responseCode < 300
+                    ? connection.getInputStream()
+                    : connection.getErrorStream();
+            JSONObject response = new JSONObject(readText(responseStream));
+            if (responseCode < 200 || responseCode >= 300) {
+                throw new IllegalStateException(
+                        response.optString("error", "The drawing could not be analyzed."));
+            }
+
+            return DrawingRecord.fromServerResponse(
+                    drawingUri.toString(),
+                    requestRevision,
+                    response);
+        } catch (Exception failure) {
+            if (requestDeadlineExceeded.get()) {
+                SocketTimeoutException timeout = new SocketTimeoutException(
+                        "Drawing AI took too long to respond.");
+                timeout.initCause(failure);
+                throw timeout;
+            }
+            throw failure;
+        } finally {
+            drawingProgressHandler.removeCallbacks(requestDeadline);
+            connection.disconnect();
+            synchronized (drawingConnectionLock) {
+                if (activeDrawingConnection == connection) activeDrawingConnection = null;
+            }
+        }
+    }
+
+    private void storeDrawingResult(Uri uri, DrawingRecord result) {
+        if (uri == null || result == null) return;
+        int index = drawingPhotoUris.indexOf(uri);
+        if (index < 0 || index >= drawingRecords.size()) return;
+        drawingRecords.set(index, result);
+        if (index == activeDrawingIndex) loadActiveDrawingResult(true);
+        persistDrawingState();
+    }
+
+    private void finishDrawingBatch(
+            int requestId,
+            int requestRevision,
+            int failureCount,
+            Uri timedOutDrawing) {
+        if (requestId != drawingAnalysisRequestId
+                || requestRevision != drawingInputRevision) return;
+        if (timedOutDrawing != null) {
+            int timedOutIndex = drawingPhotoUris.indexOf(timedOutDrawing);
+            if (timedOutIndex >= 0 && timedOutIndex < drawingRecords.size()) {
+                activeDrawingIndex = timedOutIndex;
+            }
+        }
+        loadActiveDrawingResult(true);
+        updateDrawingStatusText();
+        if (timedOutDrawing != null) {
+            int timeoutNumber = Math.max(1, drawingPhotoUris.indexOf(timedOutDrawing) + 1);
+            finishDrawingTimeoutProgress(
+                    requestId,
+                    timeoutNumber,
+                    Math.max(1, drawingPhotoUris.size()));
+        } else {
+            finishDrawingProgress(requestId);
+        }
+        calculateAndDisplay(false);
+        showStep();
+        if (timedOutDrawing != null) {
+            pendingTimeoutRecoveryRevision = requestRevision;
+            maybeOpenPendingTimeoutRecovery();
+            return;
+        }
+        if (failureCount == 0
+                && currentPageId() == PAGE_PHOTO
+                && DrawingMissingMeasurementPolicy.shouldAsk(
+                drawingAnalysisInProgress,
+                hasActiveDrawingResult(),
+                aiDrawingCanCalculate,
+                aiDrawingMissingInformation)) {
+            showMissingMeasurementPrompt();
+        }
+        if (failureCount > 0) {
+            Toast.makeText(
+                    this,
+                    failureCount + " drawing"
+                            + (failureCount == 1 ? " needs" : "s need")
+                            + " another try. Successful results were kept.",
+                    Toast.LENGTH_LONG).show();
+        }
     }
 
     private void startDrawingProgress(int requestId) {
@@ -2357,7 +5033,6 @@ public class MainActivity extends Activity {
         drawingProgressText.setVisibility(View.VISIBLE);
         drawingProgressText.setText(
                 "Estimated progress: 5%\nPreparing drawing — AI is still working");
-        if (analyzeDrawingButton != null) analyzeDrawingButton.setEnabled(false);
         if (drawingProgressRunnable != null) {
             drawingProgressHandler.removeCallbacks(drawingProgressRunnable);
         }
@@ -2386,10 +5061,10 @@ public class MainActivity extends Activity {
                     stage = "Creating verification redraw";
                 }
                 drawingProgressBar.setProgress(estimated);
-                drawingProgressText.setText(
-                        "Estimated progress: " + estimated + "%\n"
-                                + stage + " — AI is still working ("
-                                + elapsedSeconds + " seconds)");
+                drawingProgressText.setText(DrawingProgressText.estimatedStatus(
+                        estimated,
+                        stage,
+                        elapsedSeconds));
                 drawingProgressHandler.postDelayed(this, 1000);
             }
         };
@@ -2402,9 +5077,13 @@ public class MainActivity extends Activity {
             drawingProgressFloor = Math.max(drawingProgressFloor, Math.min(90, minimum));
             int progress = Math.max(drawingProgressBar.getProgress(), drawingProgressFloor);
             drawingProgressBar.setProgress(progress);
-            drawingProgressText.setText(
-                    "Estimated progress: " + progress + "%\n"
-                            + stage + " — AI is still working");
+            long elapsedSeconds = Math.max(
+                    0,
+                    (SystemClock.elapsedRealtime() - drawingAnalysisStartedAt) / 1000);
+            drawingProgressText.setText(DrawingProgressText.estimatedStatus(
+                    progress,
+                    stage,
+                    elapsedSeconds));
         });
     }
 
@@ -2421,30 +5100,39 @@ public class MainActivity extends Activity {
         drawingProgressBar.setVisibility(View.VISIBLE);
         drawingProgressText.setVisibility(View.VISIBLE);
         String completedWork;
-        if (!aiDrawingCanCalculate) {
-            completedWork = "drawing review finished without a square-foot estimate";
-        } else if (aiVerificationDrawing != null) {
-            completedWork = "measurements and verification redraw finished";
+        if (hasCompleteAiDrawingEstimate()) {
+            completedWork = drawingRecords.size() == 1
+                    ? "measurements and verification redraw finished"
+                    : drawingRecords.size() + " verified drawing estimates finished";
+        } else if (usableDrawingCount() > 0) {
+            completedWork = usableDrawingCount() + " of " + drawingRecords.size()
+                    + " drawing estimates finished; the total is incomplete";
         } else {
-            completedWork = "measurement calculation finished";
+            completedWork = "drawing review finished without a complete square-foot estimate";
         }
         drawingProgressText.setText(
                 "100% complete — " + completedWork + " in "
-                        + elapsedSeconds + " seconds");
-        if (analyzeDrawingButton != null) analyzeDrawingButton.setEnabled(true);
+                + elapsedSeconds + " seconds");
     }
 
-    private void failDrawingProgress(int requestId) {
+    private void finishDrawingTimeoutProgress(
+            int requestId,
+            int drawingNumber,
+            int drawingCount) {
         if (requestId != drawingAnalysisRequestId) return;
         drawingAnalysisInProgress = false;
         if (drawingProgressRunnable != null) {
             drawingProgressHandler.removeCallbacks(drawingProgressRunnable);
         }
-        drawingProgressBar.setVisibility(View.VISIBLE);
+        long elapsedSeconds = Math.max(
+                0,
+                (SystemClock.elapsedRealtime() - drawingAnalysisStartedAt) / 1000);
+        drawingProgressBar.setVisibility(View.GONE);
         drawingProgressText.setVisibility(View.VISIBLE);
-        drawingProgressText.setText(
-                "AI stopped before completion. Tap the button to try again.");
-        if (analyzeDrawingButton != null) analyzeDrawingButton.setEnabled(true);
+        drawingProgressText.setText(DrawingProgressText.timeoutStatus(
+                drawingNumber,
+                drawingCount,
+                elapsedSeconds));
     }
 
     private void cancelDrawingAnalysis() {
@@ -2464,28 +5152,28 @@ public class MainActivity extends Activity {
         drawingProgressBar.setVisibility(View.GONE);
         drawingProgressText.setText("");
         drawingProgressText.setVisibility(View.GONE);
-        if (analyzeDrawingButton != null) analyzeDrawingButton.setEnabled(true);
     }
 
     private void clearAiDrawingResult() {
-        aiDrawingSquareFeet = 0;
-        aiDrawingConfidence = "";
-        aiDrawingExplanation = "";
-        aiDrawingMissingInformation = "";
-        aiDrawingCanCalculate = false;
-        aiDrawingEditedByUser = false;
-        aiDrawingCalculationParts = null;
-        aiVerificationDrawing = null;
-        verificationDrawingView.clearDrawing();
-        verificationDrawingView.setVisibility(View.GONE);
-        drawingVerificationStatus.setText("");
-        drawingVerificationStatus.setVisibility(View.GONE);
+        for (int i = 0; i < drawingRecords.size(); i++) {
+            drawingRecords.set(i, drawingRecords.get(i).withoutResult());
+        }
+        clearActiveDrawingFields();
+        if (verificationDrawingView != null) {
+            verificationDrawingView.clearDrawing();
+            verificationDrawingView.setVisibility(View.GONE);
+        }
+        if (drawingVerificationStatus != null) {
+            drawingVerificationStatus.setText("");
+            drawingVerificationStatus.setVisibility(View.GONE);
+        }
+        persistDrawingState();
     }
 
-    private String drawingImageDataUrl() throws Exception {
+    private String drawingImageDataUrl(Uri drawingUri, boolean enhancedMode) throws Exception {
         BitmapFactory.Options bounds = new BitmapFactory.Options();
         bounds.inJustDecodeBounds = true;
-        try (InputStream input = getContentResolver().openInputStream(drawingPhotoUri)) {
+        try (InputStream input = getContentResolver().openInputStream(drawingUri)) {
             if (input == null) {
                 throw new IllegalStateException("The drawing photo could not be read.");
             }
@@ -2503,13 +5191,14 @@ public class MainActivity extends Activity {
         BitmapFactory.Options decodeOptions = new BitmapFactory.Options();
         decodeOptions.inSampleSize = sampleSize;
         Bitmap original;
-        try (InputStream input = getContentResolver().openInputStream(drawingPhotoUri)) {
+        try (InputStream input = getContentResolver().openInputStream(drawingUri)) {
             if (input == null) {
                 throw new IllegalStateException("The drawing photo could not be read.");
             }
             original = BitmapFactory.decodeStream(input, null, decodeOptions);
         }
         if (original == null) throw new IllegalStateException("The drawing photo could not be read.");
+        original = applyDrawingOrientation(drawingUri, original);
 
         int width = original.getWidth();
         int height = original.getHeight();
@@ -2525,7 +5214,36 @@ public class MainActivity extends Activity {
         }
 
         ByteArrayOutputStream output = new ByteArrayOutputStream();
-        upload.compress(Bitmap.CompressFormat.JPEG, 86, output);
+        if (enhancedMode) {
+            int uploadWidth = upload.getWidth();
+            int uploadHeight = upload.getHeight();
+            int[] enhancedPixels = new int[uploadWidth * uploadHeight];
+            upload.getPixels(
+                    enhancedPixels,
+                    0,
+                    uploadWidth,
+                    0,
+                    0,
+                    uploadWidth,
+                    uploadHeight);
+            DrawingImageEnhancer.enhanceInPlace(enhancedPixels, uploadWidth, uploadHeight);
+            Bitmap enhanced = Bitmap.createBitmap(
+                    uploadWidth,
+                    uploadHeight,
+                    Bitmap.Config.ARGB_8888);
+            enhanced.setPixels(
+                    enhancedPixels,
+                    0,
+                    uploadWidth,
+                    0,
+                    0,
+                    uploadWidth,
+                    uploadHeight);
+            enhanced.compress(Bitmap.CompressFormat.JPEG, 92, output);
+            enhanced.recycle();
+        } else {
+            upload.compress(Bitmap.CompressFormat.JPEG, 86, output);
+        }
         if (upload != original) upload.recycle();
         original.recycle();
         return "data:image/jpeg;base64,"
@@ -2545,8 +5263,24 @@ public class MainActivity extends Activity {
     }
 
     private void showDrawingZoom() {
-        Drawable originalDrawable = drawingPhoto.getDrawable();
-        if (originalDrawable == null && aiVerificationDrawing == null) {
+        showDrawingZoom(activeDrawingIndex);
+    }
+
+    private void showDrawingZoom(int requestedDrawingIndex) {
+        final int comparisonDrawingIndex = drawingPhotoUris.isEmpty()
+                ? 0
+                : Math.max(0, Math.min(requestedDrawingIndex, drawingPhotoUris.size() - 1));
+        if (!drawingPhotoUris.isEmpty() && comparisonDrawingIndex != activeDrawingIndex) {
+            syncActiveDrawingRecord();
+            activeDrawingIndex = comparisonDrawingIndex;
+            loadActiveDrawingResult(true);
+        }
+        final int totalOriginalDrawings = drawingPhotoUris.size();
+        final ArrayList<Uri> originalUris = new ArrayList<>();
+        if (!drawingPhotoUris.isEmpty()) {
+            originalUris.add(drawingPhotoUris.get(comparisonDrawingIndex));
+        }
+        if (originalUris.isEmpty() && aiVerificationDrawing == null) {
             Toast.makeText(this, "No drawings are available yet.", Toast.LENGTH_SHORT).show();
             return;
         }
@@ -2560,9 +5294,8 @@ public class MainActivity extends Activity {
         root.setBackgroundColor(Color.BLACK);
 
         LinearLayout controls = new LinearLayout(this);
-        controls.setOrientation(LinearLayout.HORIZONTAL);
-        controls.setGravity(Gravity.CENTER_VERTICAL);
-        controls.setPadding(dp(12), dp(8), dp(12), dp(8));
+        controls.setOrientation(LinearLayout.VERTICAL);
+        controls.setPadding(dp(12), dp(6), dp(12), dp(8));
         controls.setBackgroundColor(Color.rgb(91, 58, 41));
 
         TextView title = new TextView(this);
@@ -2570,17 +5303,32 @@ public class MainActivity extends Activity {
         title.setTextColor(Color.WHITE);
         title.setTextSize(18);
         title.setTypeface(Typeface.DEFAULT_BOLD);
-        controls.addView(title, new LinearLayout.LayoutParams(0, dp(48), 1f));
+        title.setGravity(Gravity.CENTER);
+        controls.addView(title, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(38)));
+
+        LinearLayout controlButtons = new LinearLayout(this);
+        controlButtons.setOrientation(LinearLayout.HORIZONTAL);
+        controlButtons.setGravity(Gravity.CENTER);
+
+        Button editSizes = new Button(this);
+        editSizes.setText("Edit sizes");
+        editSizes.setAllCaps(false);
+        editSizes.setEnabled(aiVerificationDrawing != null);
+        controlButtons.addView(editSizes, new LinearLayout.LayoutParams(0, dp(48), 1f));
 
         Button reset = new Button(this);
-        reset.setText("Reset both");
+        reset.setText("Reset zoom");
         reset.setAllCaps(false);
-        controls.addView(reset, new LinearLayout.LayoutParams(dp(100), dp(48)));
+        controlButtons.addView(reset, new LinearLayout.LayoutParams(0, dp(48), 1f));
 
         Button close = new Button(this);
         close.setText("Close");
         close.setAllCaps(false);
-        controls.addView(close, new LinearLayout.LayoutParams(dp(82), dp(48)));
+        controlButtons.addView(close, new LinearLayout.LayoutParams(0, dp(48), 1f));
+        controls.addView(controlButtons, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
         root.addView(controls, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -2596,19 +5344,60 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.WRAP_CONTENT));
 
         ArrayList<ZoomPanFrame> zoomFrames = new ArrayList<>();
-        if (originalDrawable != null) {
-            root.addView(comparisonDrawingLabel("Original drawing"));
+        ArrayList<ImageView> decodedOriginalViews = new ArrayList<>();
+        if (!originalUris.isEmpty()) {
+            final int[] currentOriginalIndex = new int[]{0};
+            LinearLayout originalHeading = new LinearLayout(this);
+            originalHeading.setOrientation(LinearLayout.HORIZONTAL);
+            originalHeading.setGravity(Gravity.CENTER);
+            originalHeading.setBackgroundColor(Color.rgb(91, 58, 41));
+            Button previousOriginal = new Button(this);
+            previousOriginal.setText("‹");
+            previousOriginal.setTextSize(20);
+            previousOriginal.setAllCaps(false);
+            TextView originalLabel = comparisonDrawingLabel("");
+            Button nextOriginal = new Button(this);
+            nextOriginal.setText("›");
+            nextOriginal.setTextSize(20);
+            nextOriginal.setAllCaps(false);
+            previousOriginal.setVisibility(View.GONE);
+            nextOriginal.setVisibility(View.GONE);
+            originalHeading.addView(previousOriginal, new LinearLayout.LayoutParams(dp(54), dp(44)));
+            originalHeading.addView(originalLabel, new LinearLayout.LayoutParams(0, dp(44), 1f));
+            originalHeading.addView(nextOriginal, new LinearLayout.LayoutParams(dp(54), dp(44)));
+            root.addView(originalHeading, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT));
+
             ZoomPanFrame originalZoomFrame = new ZoomPanFrame(this);
             ImageView enlargedOriginal = new ImageView(this);
+            decodedOriginalViews.add(enlargedOriginal);
             enlargedOriginal.setScaleType(ImageView.ScaleType.FIT_CENTER);
             enlargedOriginal.setBackgroundColor(Color.WHITE);
-            Drawable zoomDrawable = originalDrawable;
-            if (originalDrawable.getConstantState() != null) {
-                zoomDrawable = originalDrawable.getConstantState().newDrawable(getResources()).mutate();
-            }
-            enlargedOriginal.setImageDrawable(zoomDrawable);
-            enlargedOriginal.setContentDescription("Enlarged original countertop drawing");
+            Runnable updateOriginal = () -> {
+                int index = currentOriginalIndex[0];
+                loadDrawingIntoImageView(enlargedOriginal, originalUris.get(index), 1800);
+                originalLabel.setText("Original drawing " + (comparisonDrawingIndex + 1)
+                        + " of " + totalOriginalDrawings);
+                enlargedOriginal.setContentDescription(
+                        "Enlarged original countertop drawing " + (comparisonDrawingIndex + 1)
+                                + " of " + totalOriginalDrawings);
+                previousOriginal.setEnabled(index > 0);
+                nextOriginal.setEnabled(index < originalUris.size() - 1);
+                originalZoomFrame.resetZoom();
+            };
+            previousOriginal.setOnClickListener(v -> {
+                if (currentOriginalIndex[0] <= 0) return;
+                currentOriginalIndex[0]--;
+                updateOriginal.run();
+            });
+            nextOriginal.setOnClickListener(v -> {
+                if (currentOriginalIndex[0] >= originalUris.size() - 1) return;
+                currentOriginalIndex[0]++;
+                updateOriginal.run();
+            });
             originalZoomFrame.setZoomContent(enlargedOriginal);
+            updateOriginal.run();
             zoomFrames.add(originalZoomFrame);
             root.addView(originalZoomFrame, new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -2621,6 +5410,7 @@ public class MainActivity extends Activity {
             ZoomPanFrame redrawZoomFrame = new ZoomPanFrame(this);
             VerificationDrawingView enlargedRedraw = new VerificationDrawingView(this);
             enlargedRedraw.setVerificationDrawing(aiVerificationDrawing);
+            enlargedRedraw.setCalculationParts(aiDrawingCalculationParts);
             redrawZoomFrame.setZoomContent(enlargedRedraw);
             zoomFrames.add(redrawZoomFrame);
             root.addView(redrawZoomFrame, new LinearLayout.LayoutParams(
@@ -2632,9 +5422,14 @@ public class MainActivity extends Activity {
         reset.setOnClickListener(v -> {
             for (ZoomPanFrame zoomFrame : zoomFrames) zoomFrame.resetZoom();
         });
+        editSizes.setOnClickListener(v -> {
+            dialog.dismiss();
+            showVerificationEditor();
+        });
         close.setOnClickListener(v -> dialog.dismiss());
         dialog.setOnDismissListener(ignored -> {
             for (ZoomPanFrame zoomFrame : zoomFrames) zoomFrame.removeAllViews();
+            for (ImageView imageView : decodedOriginalViews) clearDecodedDrawing(imageView);
             if (drawingZoomDialog == dialog) drawingZoomDialog = null;
         });
         dialog.setContentView(root);
@@ -2667,12 +5462,23 @@ public class MainActivity extends Activity {
     private void updateDrawingStatusText() {
         if (drawingStatus == null) return;
         StringBuilder status = new StringBuilder();
-        if (aiDrawingCanCalculate) {
-            status.append(aiDrawingEditedByUser ? "Edited estimate: " : "AI estimate: ")
+        status.append("Drawing ")
+                .append(Math.min(activeDrawingIndex + 1, drawingPhotoUris.size()))
+                .append(" of ")
+                .append(drawingPhotoUris.size())
+                .append(": ");
+        if (!hasActiveDrawingResult()) {
+            if (aiDrawingLastError.isEmpty()) {
+                status.append("not analyzed yet");
+            } else {
+                status.append("needs another try — ").append(aiDrawingLastError);
+            }
+        } else if (aiDrawingCanCalculate) {
+            status.append(aiDrawingEditedByUser ? "edited estimate " : "AI estimate ")
                     .append(number.format(aiDrawingSquareFeet))
                     .append(" sq ft");
         } else {
-            status.append("AI could not calculate the square footage.");
+            status.append("AI could not calculate the square footage");
         }
         if (aiDrawingEditedByUser) {
             status.append("\nMeasurements edited by you");
@@ -2685,46 +5491,140 @@ public class MainActivity extends Activity {
         if (!aiDrawingMissingInformation.isEmpty()) {
             status.append("\nMissing information: ").append(aiDrawingMissingInformation);
         }
+        if (hasActiveDrawingResult() && !aiDrawingLastError.isEmpty()) {
+            status.append("\nLatest refresh problem: ").append(aiDrawingLastError)
+                    .append(" The saved result was kept.");
+        }
+
+        int selectedCount = drawingRecords.size();
+        int usableCount = usableDrawingCount();
+        if (selectedCount > 1 && hasCompleteAiDrawingEstimate()) {
+            status.append("\nCombined total: ")
+                    .append(number.format(combinedAiDrawingSquareFeet()))
+                    .append(" sq ft from ")
+                    .append(selectedCount)
+                    .append(" drawings");
+        } else if (selectedCount > 1 && usableCount > 0) {
+            status.append("\nCalculated subtotal: ")
+                    .append(number.format(calculatedDrawingSubtotal()))
+                    .append(" sq ft from ")
+                    .append(usableCount)
+                    .append(" of ")
+                    .append(selectedCount)
+                    .append(" drawings — incomplete and not used for pricing");
+        } else if (selectedCount > 1) {
+            status.append("\n")
+                    .append(analyzedDrawingCount())
+                    .append(" of ")
+                    .append(selectedCount)
+                    .append(" drawings analyzed — no combined price total yet");
+        }
         drawingStatus.setText(status.toString());
     }
 
-    private void showDrawingResult(
-            int requestId,
-            boolean canCalculate,
-            double squareFeet,
-            String confidence,
-            String explanation,
-            String missingInformation,
-            JSONArray calculationParts,
-            JSONObject verificationDrawing) {
-        aiDrawingCanCalculate = canCalculate;
-        aiDrawingSquareFeet = canCalculate ? Math.max(0, squareFeet) : 0;
-        aiDrawingConfidence = confidence;
-        aiDrawingExplanation = explanation;
-        aiDrawingMissingInformation = missingInformation;
-        aiDrawingEditedByUser = false;
-        aiDrawingCalculationParts = calculationParts;
-        aiVerificationDrawing = verificationDrawing;
-        if (verificationDrawing != null) {
-            verificationDrawingView.setVerificationDrawing(verificationDrawing);
-        } else {
-            verificationDrawingView.clearDrawing();
+    private void showMissingMeasurementPrompt() {
+        if (drawingAnalysisInProgress || !hasActiveDrawingResult()) return;
+        if (aiVerificationDrawing != null) {
+            showVerificationEditor(true);
+            return;
         }
-        updateDrawingStatusText();
-        finishDrawingProgress(requestId);
-        showStep();
+
+        String missing = aiDrawingMissingInformation == null
+                ? ""
+                : aiDrawingMissingInformation.trim();
+        String explanation = aiDrawingExplanation == null
+                ? ""
+                : aiDrawingExplanation.trim();
+        StringBuilder message = new StringBuilder(
+                "The AI read what it could without guessing.");
+        if (!explanation.isEmpty()) {
+            message.append("\n\nWhat it found: ").append(explanation);
+        }
+        if (!missing.isEmpty()) {
+            message.append("\n\nStill needed: ").append(missing);
+        }
+        message.append(
+                "\n\nStart an editable redraw to draw each countertop or backsplash rectangle and enter its exact measurements. You can also use the Manual measurement page.");
+        new AlertDialog.Builder(this)
+                .setTitle("Finish what the AI could read")
+                .setMessage(message.toString())
+                .setNegativeButton("Not now", null)
+                .setNeutralButton("Manual measurement", (dialog, which) -> {
+                    int manualIndex = pageOrder.indexOf(PAGE_MANUAL_MEASUREMENT);
+                    if (manualIndex >= 0) {
+                        stepIndex = manualIndex;
+                        showStep();
+                    }
+                })
+                .setPositiveButton("Start editable redraw", (dialog, which) ->
+                        startEditableDrawingFromPartialResult())
+                .show();
+    }
+
+    private void startEditableDrawingFromPartialResult() {
+        if (!hasActiveDrawingResult()) return;
+        try {
+            aiVerificationDrawing = DrawingFallback.blankEditable();
+            if (aiVerificationDrawing == null) throw new IllegalStateException();
+            if (aiDrawingCalculationParts == null) {
+                aiDrawingCalculationParts = new JSONArray();
+            }
+            syncActiveDrawingRecord();
+            persistDrawingState();
+            showVerificationEditor(true);
+        } catch (Exception ignored) {
+            Toast.makeText(
+                    this,
+                    "The editable redraw could not be started.",
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void openEditableDrawingAfterTimeout(int requestRevision) {
+        if (requestRevision != drawingInputRevision || isFinishing()) return;
+        DrawingRecord previous = activeDrawingRecord();
+        if (previous == null) return;
+        DrawingRecord editable = previous.editableAfterTimeout(
+                requestRevision,
+                previous.lastError.isEmpty()
+                        ? "Drawing AI took too long to respond."
+                        : previous.lastError);
+        drawingRecords.set(activeDrawingIndex, editable);
+        loadActiveDrawingResult(true);
+        persistDrawingState();
+        Toast.makeText(
+                this,
+                editable.canCalculate
+                        ? "AI took too long. Your saved measurements were kept and are ready to edit."
+                        : "AI took too long. Draw or select each piece and enter its exact measurements.",
+                Toast.LENGTH_LONG).show();
+        showVerificationEditor(!editable.canCalculate);
     }
 
     private void showVerificationEditor() {
+        showVerificationEditor(false);
+    }
+
+    private void showVerificationEditor(boolean missingMeasurementMode) {
+        if (drawingAnalysisInProgress) {
+            Toast.makeText(
+                    this,
+                    "Wait for the current drawing analysis to finish before editing.",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
         if (aiVerificationDrawing == null) {
             Toast.makeText(this, "There is no AI redraw to edit yet.", Toast.LENGTH_LONG).show();
             return;
         }
         if (drawingEditDialog != null) drawingEditDialog.dismiss();
 
+        final JSONObject baselineDrawing;
         final JSONObject workingDrawing;
         try {
-            workingDrawing = new JSONObject(aiVerificationDrawing.toString());
+            baselineDrawing = new JSONObject(aiVerificationDrawing.toString());
+            DrawingShapeGeometry.orthogonalizeDrawing(baselineDrawing);
+            workingDrawing = new JSONObject(baselineDrawing.toString());
         } catch (Exception e) {
             Toast.makeText(this, "The redraw could not be opened for editing.", Toast.LENGTH_LONG).show();
             return;
@@ -2743,7 +5643,7 @@ public class MainActivity extends Activity {
         toolbar.setBackgroundColor(Color.rgb(91, 58, 41));
 
         TextView title = new TextView(this);
-        title.setText("Edit AI redraw");
+        title.setText(missingMeasurementMode ? "Enter missing measurement" : "Edit AI redraw");
         title.setTextColor(Color.WHITE);
         title.setTextSize(18);
         title.setTypeface(Typeface.DEFAULT_BOLD);
@@ -2769,103 +5669,516 @@ public class MainActivity extends Activity {
         root.addView(editorScroll, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
+        String missingPrompt = aiDrawingMissingInformation == null
+                ? ""
+                : aiDrawingMissingInformation.trim();
+        String instructionText = missingMeasurementMode
+                ? (missingPrompt.isEmpty()
+                ? "The AI could not calculate until you enter the missing measurement below. Use inches and verify the redraw before saving. "
+                : "The AI needs: " + missingPrompt
+                + "\n\nEnter the missing measurement below in inches and verify the redraw before saving. ")
+                : "Change a number below to correct the displayed dimension and square-foot total. ";
         TextView instructions = label(
-                "Change a number below to correct the displayed dimension and square-foot total. "
-                        + "The outline is a verification guide. Optional labels are the only words placed on the redraw.");
+                instructionText
+                        + "Tap a displayed measurement on the redraw to change it. "
+                        + "Tap a piece to select it, then drag it with one finger to move it. "
+                        + "The outline is a verification guide and model-written descriptions are hidden.");
         instructions.setTextSize(15);
         content.addView(instructions);
 
+        final float[] drawnRectangle = {
+                Float.NaN,
+                Float.NaN,
+                Float.NaN,
+                Float.NaN
+        };
+        final int[] selectedExistingShape = {-1};
+        final HashMap<Integer, double[]> movedShapeOffsets = new HashMap<>();
+        final boolean[] updatingEditorFields = {false};
+        Spinner addedAreaType = drawingChoiceSpinner(
+                new String[]{
+                        "No added rectangle",
+                        "Countertop — include in square footage",
+                        "Backsplash — include in square footage",
+                        "Sink/cooktop — no square-foot change",
+                        "Slide-in stove — deduct",
+                        "Other opening/notch — deduct"
+                },
+                0);
+        EditText addedAreaLength = input("L — length (in)", decimalInput());
+        EditText addedAreaWidth = input("W — width (in)", decimalInput());
+        addedAreaLength.setImeOptions(EditorInfo.IME_ACTION_NEXT);
+        addedAreaWidth.setImeOptions(EditorInfo.IME_ACTION_DONE);
+
+        TextView rectangleStatus = label(
+                "Tap a piece to select it and drag it to move it, or draw a new rectangle. "
+                        + "Enter exact L and W measurements below.");
+        rectangleStatus.setTextSize(14);
+        rectangleStatus.setGravity(Gravity.CENTER);
+
         VerificationDrawingView preview = new VerificationDrawingView(this);
-        preview.setVerificationDrawing(workingDrawing);
+        preview.setEditableVerificationDrawing(workingDrawing);
+        preview.setCalculationParts(aiDrawingCalculationParts);
         content.addView(preview, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(300)));
 
-        content.addView(editorSectionTitle("Dimensions in inches"));
+        // Keep the compact draw and measurement controls visible while looking at the redraw.
+        LinearLayout controlsPanel = new LinearLayout(this);
+        controlsPanel.setOrientation(LinearLayout.VERTICAL);
+        controlsPanel.setPadding(dp(14), dp(3), dp(14), dp(7));
+        controlsPanel.setBackgroundColor(Color.rgb(248, 246, 243));
+        controlsPanel.setElevation(dp(6));
+
+        Button drawRectangle = compactDialogButton("Draw rectangle");
+        drawRectangle.setContentDescription("Draw a square or rectangle");
+        LinearLayout.LayoutParams drawRectangleParams = new LinearLayout.LayoutParams(
+                dp(190),
+                dp(48));
+        drawRectangleParams.gravity = Gravity.CENTER_HORIZONTAL;
+        drawRectangleParams.setMargins(0, dp(5), 0, dp(2));
+        drawRectangle.setLayoutParams(drawRectangleParams);
+        controlsPanel.addView(drawRectangle);
+
+        LinearLayout addedDimensionRow = new LinearLayout(this);
+        addedDimensionRow.setOrientation(LinearLayout.HORIZONTAL);
+        addedDimensionRow.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams addedLengthParams = new LinearLayout.LayoutParams(
+                0,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                1f);
+        addedLengthParams.setMargins(0, dp(2), dp(4), dp(2));
+        LinearLayout.LayoutParams addedWidthParams = new LinearLayout.LayoutParams(
+                0,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                1f);
+        addedWidthParams.setMargins(dp(4), dp(2), 0, dp(2));
+        addedDimensionRow.addView(addedAreaLength, addedLengthParams);
+        addedDimensionRow.addView(addedAreaWidth, addedWidthParams);
+        controlsPanel.addView(addedDimensionRow);
+        LinearLayout.LayoutParams addedAreaTypeParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(48));
+        addedAreaTypeParams.setMargins(0, dp(1), 0, dp(1));
+        controlsPanel.addView(addedAreaType, addedAreaTypeParams);
+
+        rectangleStatus.setTextSize(12);
+        rectangleStatus.setSingleLine(true);
+        rectangleStatus.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        rectangleStatus.setPadding(0, dp(2), 0, dp(2));
+        controlsPanel.addView(rectangleStatus);
+        root.addView(controlsPanel, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+
         JSONArray dimensions = workingDrawing.optJSONArray("dimensions");
+        List<DrawingPieceSummary.Piece> editorPieces = DrawingPieceSummary.summarize(
+                workingDrawing,
+                aiDrawingCalculationParts);
         ArrayList<EditText> dimensionFields = new ArrayList<>();
         ArrayList<Double> originalDimensionValues = new ArrayList<>();
         ArrayList<Integer> dimensionIndexes = new ArrayList<>();
-        if (dimensions == null || dimensions.length() == 0) {
-            content.addView(label("No editable dimensions were found."));
-        } else {
-            for (int i = 0; i < Math.min(dimensions.length(), 50); i++) {
+        if (dimensions != null && dimensions.length() > 0) {
+            Button measurementToggle = secondaryButton("Edit all measurements");
+            measurementToggle.setContentDescription("Show all editable drawing measurements");
+            LinearLayout measurementPanel = new LinearLayout(this);
+            measurementPanel.setOrientation(LinearLayout.VERTICAL);
+            measurementPanel.setVisibility(View.GONE);
+            measurementPanel.addView(editorSectionTitle("Edit all measurements"));
+            LinearLayout dimensionsGrid = new LinearLayout(this);
+            dimensionsGrid.setOrientation(LinearLayout.VERTICAL);
+            LinearLayout dimensionRow = null;
+            ArrayList<Integer> orderedDimensionIndexes = orderedDrawingDimensionIndexes(
+                    workingDrawing,
+                    aiDrawingCalculationParts);
+            for (int orderIndex = 0;
+                 orderIndex < Math.min(orderedDimensionIndexes.size(), 50);
+                 orderIndex++) {
+                int i = orderedDimensionIndexes.get(orderIndex);
                 final JSONObject dimension = dimensions.optJSONObject(i);
                 if (dimension == null) continue;
                 final double originalValue = dimension.optDouble("value_inches", 0);
-                content.addView(label(dimensionEditorDescription(
-                        dimension,
-                        workingDrawing,
-                        dimensionFields.size() + 1)));
-                EditText field = input("Dimension in inches", decimalInput());
-                field.setText(measurementValue(originalValue));
+                int displayedNumber = dimensionFields.size() + 1;
+                if ((displayedNumber - 1) % 2 == 0) {
+                    dimensionRow = new LinearLayout(this);
+                    dimensionRow.setOrientation(LinearLayout.HORIZONTAL);
+                    dimensionRow.setGravity(Gravity.CENTER_VERTICAL);
+                    dimensionsGrid.addView(dimensionRow, new LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT));
+                }
+                LinearLayout dimensionCell = new LinearLayout(this);
+                dimensionCell.setOrientation(LinearLayout.HORIZONTAL);
+                dimensionCell.setGravity(Gravity.CENTER_VERTICAL);
+                dimensionCell.setPadding(dp(2), dp(2), dp(2), dp(2));
+                DrawingPieceSummary.Piece piece = DrawingPieceSummary.forDimension(
+                        editorPieces,
+                        dimension);
+                String role = dimension.optString("role", "");
+                String roleLabel = "length".equals(role)
+                        ? "L"
+                        : "width".equals(role) ? "W" : "D";
+                String fieldLabel = piece == null
+                        ? roleLabel + displayedNumber
+                        : "#" + piece.number + " " + roleLabel;
+                TextView numberLabel = label(fieldLabel);
+                numberLabel.setTextSize(14);
+                numberLabel.setGravity(Gravity.CENTER);
+                dimensionCell.addView(numberLabel, new LinearLayout.LayoutParams(
+                        dp(54),
+                        ViewGroup.LayoutParams.WRAP_CONTENT));
+                EditText field = input("Inches", decimalInput());
+                field.setContentDescription(piece == null
+                        ? "Drawing measurement " + displayedNumber + " in inches"
+                        : "Piece " + piece.number + " " + roleLabel + " in inches");
+                if (originalValue > 0) {
+                    field.setText(measurementValue(originalValue));
+                } else {
+                    field.setHint("Missing");
+                }
                 field.setSelectAllOnFocus(true);
                 field.setImeOptions(EditorInfo.IME_ACTION_NEXT);
                 field.addTextChangedListener(new TextWatcher() {
                     @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
                     @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
-                        double entered = positiveDrawingValue(s.toString());
-                        if (entered <= 0) return;
-                        try {
-                            dimension.put("value_inches", entered);
-                            dimension.put("label", formatDrawingDimension(entered));
-                            preview.invalidate();
-                        } catch (Exception ignored) {
-                        }
+                        if (updatingEditorFields[0]) return;
+                        refreshVerificationEditorPreview(
+                                baselineDrawing,
+                                workingDrawing,
+                                dimensionFields,
+                                dimensionIndexes,
+                                selectedExistingShape,
+                                addedAreaType,
+                                addedAreaLength,
+                                addedAreaWidth,
+                                movedShapeOffsets,
+                                preview);
                     }
                     @Override public void afterTextChanged(Editable s) {}
                 });
-                content.addView(field);
+                dimensionCell.addView(field, new LinearLayout.LayoutParams(
+                        0,
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        1f));
+                if (dimensionRow != null) {
+                    LinearLayout.LayoutParams cellParams = new LinearLayout.LayoutParams(
+                            0,
+                            ViewGroup.LayoutParams.WRAP_CONTENT,
+                            1f);
+                    cellParams.setMargins(dp(2), dp(2), dp(2), dp(2));
+                    dimensionRow.addView(dimensionCell, cellParams);
+                }
                 dimensionFields.add(field);
                 originalDimensionValues.add(originalValue);
                 dimensionIndexes.add(i);
             }
+            if (dimensionFields.size() % 2 == 1 && dimensionRow != null) {
+                dimensionRow.addView(new View(this), new LinearLayout.LayoutParams(
+                        0,
+                        1,
+                        1f));
+            }
+            measurementPanel.addView(dimensionsGrid);
+            TextView pieceHelp = label(
+                    "Use this backup list only when a displayed measurement is difficult to tap. The drawing above is the main piece list.");
+            pieceHelp.setTextSize(13);
+            pieceHelp.setGravity(Gravity.CENTER);
+            measurementPanel.addView(pieceHelp);
+            boolean[] measurementsOpen = {false};
+            measurementToggle.setOnClickListener(v -> {
+                measurementsOpen[0] = !measurementsOpen[0];
+                measurementPanel.setVisibility(
+                        measurementsOpen[0] ? View.VISIBLE : View.GONE);
+                measurementToggle.setText(
+                        measurementsOpen[0]
+                                ? "Hide all measurements"
+                                : "Edit all measurements");
+                measurementToggle.setContentDescription(
+                        measurementsOpen[0]
+                                ? "Hide all editable drawing measurements"
+                                : "Show all editable drawing measurements");
+                if (!measurementsOpen[0]) {
+                    hideKeyboard();
+                    measurementToggle.requestFocus();
+                }
+                measurementToggle.announceForAccessibility(
+                        measurementsOpen[0]
+                                ? "All measurements expanded"
+                                : "All measurements collapsed");
+            });
+            content.addView(measurementToggle);
+            content.addView(measurementPanel);
         }
 
-        content.addView(editorSectionTitle("Optional labels"));
-        TextView labelHelp = label(
-                "Leave these blank for a numbers-only redraw. Type a short name such as Island only where you want it shown.");
-        labelHelp.setTextSize(15);
-        content.addView(labelHelp);
+        preview.setOnDimensionSelectedListener(dimensionIndex -> {
+            int fieldIndex = dimensionIndexes.indexOf(dimensionIndex);
+            JSONObject dimension = dimensions == null
+                    ? null
+                    : dimensions.optJSONObject(dimensionIndex);
+            if (fieldIndex < 0 || dimension == null) {
+                Toast.makeText(
+                        this,
+                        "That displayed measurement is not editable.",
+                        Toast.LENGTH_SHORT).show();
+                return;
+            }
+            selectedExistingShape[0] = -1;
+            preview.clearShapeSelection();
+            preview.clearRectangleDraft();
+            for (int i = 0; i < drawnRectangle.length; i++) drawnRectangle[i] = Float.NaN;
+            updatingEditorFields[0] = true;
+            addedAreaType.setSelection(0);
+            addedAreaLength.setText("");
+            addedAreaWidth.setText("");
+            updatingEditorFields[0] = false;
+            EditText dimensionField = dimensionFields.get(fieldIndex);
+            rectangleStatus.setText(
+                    "Measurement " + formatDrawingDimension(
+                            dimension.optDouble("value_inches", 0))
+                            + " selected. Enter the corrected inches.");
+            showDrawingDimensionEditor(
+                    workingDrawing,
+                    dimension,
+                    dimensionField,
+                    preview);
+        });
+        preview.setOnShapeSelectedListener(shapeIndex -> {
+            JSONArray shapes = workingDrawing.optJSONArray("shapes");
+            JSONObject shape = shapes == null ? null : shapes.optJSONObject(shapeIndex);
+            if (shape == null) return;
+            selectedExistingShape[0] = shapeIndex;
+            preview.clearRectangleDraft();
+            for (int i = 0; i < drawnRectangle.length; i++) drawnRectangle[i] = Float.NaN;
+            DrawingShapeMeasurementEditor.Values values =
+                    DrawingShapeMeasurementEditor.existingValues(
+                            workingDrawing,
+                            aiDrawingCalculationParts,
+                            shapeIndex);
+            double selectedLength = values.length;
+            double selectedWidth = values.width;
+            JSONArray currentDimensions = workingDrawing.optJSONArray("dimensions");
+            if (currentDimensions != null) {
+                for (int i = 0; i < Math.min(50, currentDimensions.length()); i++) {
+                    JSONObject currentDimension = currentDimensions.optJSONObject(i);
+                    if (!DrawingShapeMeasurementEditor.matchesDimension(
+                            shape,
+                            shapeIndex,
+                            currentDimension)) continue;
+                    double currentValue = currentDimension.optDouble("value_inches", 0);
+                    String role = currentDimension.optString("role", "");
+                    if (currentValue > 0 && "length".equals(role)) {
+                        selectedLength = currentValue;
+                    } else if (currentValue > 0 && "width".equals(role)) {
+                        selectedWidth = currentValue;
+                    }
+                }
+            }
+            updatingEditorFields[0] = true;
+            addedAreaLength.setText(
+                    selectedLength > 0 ? measurementValue(selectedLength) : "");
+            addedAreaWidth.setText(
+                    selectedWidth > 0 ? measurementValue(selectedWidth) : "");
+            addedAreaType.setSelection(addedAreaSelectionForFeature(shape));
+            updatingEditorFields[0] = false;
+            DrawingPieceSummary.Piece selectedPiece = DrawingPieceSummary.forShape(
+                    editorPieces,
+                    shapeIndex);
+            String selectedPieceName = selectedPiece == null
+                    ? "selected shape"
+                    : "piece #" + selectedPiece.number;
+            rectangleStatus.setText(
+                    (selectedPiece == null ? "Selected shape" : "Piece #" + selectedPiece.number)
+                            + " selected. Drag it to move it, or enter its exact length and width, then tap Save.");
+        });
+        preview.setOnDrawingMovedListener((shapeIndex, rectangleDraftSelected, deltaX, deltaY) -> {
+            if (rectangleDraftSelected) {
+                selectedExistingShape[0] = -1;
+            } else if (shapeIndex >= 0) {
+                selectedExistingShape[0] = shapeIndex;
+            }
+            return moveSelectedPieceOrRectangle(
+                    preview,
+                    workingDrawing,
+                    selectedExistingShape,
+                    movedShapeOffsets,
+                    rectangleStatus,
+                    deltaX,
+                    deltaY);
+        });
+        TextWatcher selectedPieceSizeWatcher = new TextWatcher() {
+            @Override public void beforeTextChanged(
+                    CharSequence s,
+                    int start,
+                    int count,
+                    int after) {
+            }
 
-        JSONArray shapes = workingDrawing.optJSONArray("shapes");
-        ArrayList<EditText> shapeLabelFields = new ArrayList<>();
-        ArrayList<Integer> editableShapeIndexes = new ArrayList<>();
-        if (shapes != null) {
-            for (int i = 0; i < Math.min(shapes.length(), 24); i++) {
-                final JSONObject shape = shapes.optJSONObject(i);
-                if (shape == null || "backsplash".equals(shape.optString("kind"))) continue;
-                content.addView(label(shapeEditorDescription(
-                        shape,
-                        workingDrawing,
-                        editableShapeIndexes.size() + 1)));
-                EditText field = input(
-                        "Optional label, for example Island",
-                        InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
-                field.setText(shape.optString("user_label", ""));
-                field.setSingleLine(true);
-                field.setImeOptions(EditorInfo.IME_ACTION_NEXT);
-                field.addTextChangedListener(new TextWatcher() {
-                    @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
-                    @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
-                        try {
-                            String clean = cleanDrawingLabel(s.toString());
-                            if (clean.isEmpty()) shape.remove("user_label");
-                            else shape.put("user_label", clean);
-                            preview.invalidate();
-                        } catch (Exception ignored) {
+            @Override public void onTextChanged(
+                    CharSequence s,
+                    int start,
+                    int before,
+                    int count) {
+                if (updatingEditorFields[0]) return;
+                double length = positiveDrawingValue(addedAreaLength.getText().toString());
+                double width = positiveDrawingValue(addedAreaWidth.getText().toString());
+                if (selectedExistingShape[0] < 0) {
+                    int selection = addedAreaType.getSelectedItemPosition();
+                    preview.setRectangleDraftMeasurements(
+                            length,
+                            width,
+                            DrawingPieceSummary.nextNumber(
+                                    aiVerificationDrawing,
+                                    aiDrawingCalculationParts),
+                            selection > 0 && selection != 3,
+                            selection == 4 || selection == 5);
+                    if (length > 0 && width > 0 && hasDrawnRectangle(drawnRectangle)) {
+                        float[] resized = preview.resizeRectangleToMeasurements(length, width);
+                        if (resized != null) {
+                            System.arraycopy(resized, 0, drawnRectangle, 0, drawnRectangle.length);
+                            rectangleStatus.setText(
+                                    "New rectangle resized in proportion to the other pieces.");
                         }
                     }
-                    @Override public void afterTextChanged(Editable s) {}
-                });
-                content.addView(field);
-                editableShapeIndexes.add(i);
-                shapeLabelFields.add(field);
+                    return;
+                }
+                if (length > 0 && width > 0) {
+                    updatingEditorFields[0] = true;
+                    syncSelectedShapeDimensionFields(
+                            workingDrawing,
+                            selectedExistingShape[0],
+                            length,
+                            width,
+                            dimensionFields,
+                            dimensionIndexes);
+                    updatingEditorFields[0] = false;
+                }
+                refreshVerificationEditorPreview(
+                        baselineDrawing,
+                        workingDrawing,
+                        dimensionFields,
+                        dimensionIndexes,
+                        selectedExistingShape,
+                        addedAreaType,
+                        addedAreaLength,
+                        addedAreaWidth,
+                        movedShapeOffsets,
+                        preview);
+            }
+
+            @Override public void afterTextChanged(Editable s) {
+            }
+        };
+        addedAreaLength.addTextChangedListener(selectedPieceSizeWatcher);
+        addedAreaWidth.addTextChangedListener(selectedPieceSizeWatcher);
+        addedAreaType.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(
+                    AdapterView<?> parent,
+                    View view,
+                    int position,
+                    long id) {
+                if (updatingEditorFields[0]) return;
+                double length = positiveDrawingValue(addedAreaLength.getText().toString());
+                double width = positiveDrawingValue(addedAreaWidth.getText().toString());
+                if (selectedExistingShape[0] < 0) {
+                    preview.setRectangleDraftMeasurements(
+                            length,
+                            width,
+                            DrawingPieceSummary.nextNumber(
+                                    aiVerificationDrawing,
+                                    aiDrawingCalculationParts),
+                            position > 0 && position != 3,
+                            position == 4 || position == 5);
+                    return;
+                }
+                refreshVerificationEditorPreview(
+                        baselineDrawing,
+                        workingDrawing,
+                        dimensionFields,
+                        dimensionIndexes,
+                        selectedExistingShape,
+                        addedAreaType,
+                        addedAreaLength,
+                        addedAreaWidth,
+                        movedShapeOffsets,
+                        preview);
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {
+            }
+        });
+        drawRectangle.setOnClickListener(v -> {
+            selectedExistingShape[0] = -1;
+            preview.clearShapeSelection();
+            double enteredLength = positiveDrawingValue(addedAreaLength.getText().toString());
+            double enteredWidth = positiveDrawingValue(addedAreaWidth.getText().toString());
+            int enteredSelection = addedAreaType.getSelectedItemPosition();
+            preview.setRectangleDraftMeasurements(
+                    enteredLength,
+                    enteredWidth,
+                    DrawingPieceSummary.nextNumber(
+                            aiVerificationDrawing,
+                            aiDrawingCalculationParts),
+                    enteredSelection > 0 && enteredSelection != 3,
+                    enteredSelection == 4 || enteredSelection == 5);
+            preview.startRectangleDrawing((left, top, right, bottom) -> {
+                drawnRectangle[0] = left;
+                drawnRectangle[1] = top;
+                drawnRectangle[2] = right;
+                drawnRectangle[3] = bottom;
+                double length = positiveDrawingValue(addedAreaLength.getText().toString());
+                double width = positiveDrawingValue(addedAreaWidth.getText().toString());
+                if (length > 0 && width > 0) {
+                    float[] resized = preview.resizeRectangleToMeasurements(length, width);
+                    if (resized != null) {
+                        System.arraycopy(resized, 0, drawnRectangle, 0, drawnRectangle.length);
+                    }
+                }
+                if (addedAreaType.getSelectedItemPosition() == 0) {
+                    addedAreaType.setSelection(1);
+                }
+                int selection = addedAreaType.getSelectedItemPosition();
+                preview.setRectangleDraftMeasurements(
+                        length,
+                        width,
+                        DrawingPieceSummary.nextNumber(
+                                aiVerificationDrawing,
+                                aiDrawingCalculationParts),
+                        selection > 0 && selection != 3,
+                        selection == 4 || selection == 5);
+                rectangleStatus.setText(
+                        "Rectangle ready. Drag it with one finger to move it, then tap Save.");
+            });
+            rectangleStatus.setText("Drag one corner to the opposite corner on the redraw above.");
+        });
+
+        ArrayList<EditText> shapeLabelFields = new ArrayList<>();
+        ArrayList<Integer> editableShapeIndexes = new ArrayList<>();
+        ArrayList<Spinner> shapeTypeFields = new ArrayList<>();
+        ArrayList<Integer> originalShapeSelections = new ArrayList<>();
+        CheckBox allowUnlinkedPictureOnly = new CheckBox(this);
+
+        ArrayList<Spinner> areaRuleFields = new ArrayList<>();
+        ArrayList<Integer> areaRulePartIndexes = new ArrayList<>();
+        ArrayList<Integer> originalAreaSelections = new ArrayList<>();
+        if (aiDrawingCalculationParts != null) {
+            for (int i = 0; i < Math.min(aiDrawingCalculationParts.length(), 40); i++) {
+                JSONObject part = aiDrawingCalculationParts.optJSONObject(i);
+                if (part == null) continue;
+                int selected = DrawingRules.areaEditorSelection(part);
+                Spinner areaRule = drawingChoiceSpinner(
+                        new String[]{
+                                "Include in square footage",
+                                "Sink/cooktop or ignore — no square-foot change",
+                                "Slide-in stove — deduct",
+                                "Other opening/notch — deduct"
+                        },
+                        selected);
+                areaRuleFields.add(areaRule);
+                areaRulePartIndexes.add(i);
+                originalAreaSelections.add(selected);
             }
         }
-        if (editableShapeIndexes.isEmpty()) {
-            content.addView(label("No countertop pieces or openings were available for a custom label."));
-        }
-
         cancel.setOnClickListener(v -> dialog.dismiss());
         save.setOnClickListener(v -> saveVerificationEdits(
                 dialog,
@@ -2873,7 +6186,19 @@ public class MainActivity extends Activity {
                 originalDimensionValues,
                 dimensionIndexes,
                 editableShapeIndexes,
-                shapeLabelFields));
+                shapeTypeFields,
+                originalShapeSelections,
+                shapeLabelFields,
+                allowUnlinkedPictureOnly,
+                areaRuleFields,
+                areaRulePartIndexes,
+                originalAreaSelections,
+                addedAreaType,
+                addedAreaLength,
+                addedAreaWidth,
+                drawnRectangle,
+                selectedExistingShape,
+                movedShapeOffsets));
         dialog.setOnDismissListener(ignored -> {
             hideKeyboard();
             if (drawingEditDialog == dialog) drawingEditDialog = null;
@@ -2903,6 +6228,248 @@ public class MainActivity extends Activity {
         return button;
     }
 
+    private DrawingDragGesture.AppliedDelta moveSelectedPieceOrRectangle(
+            VerificationDrawingView preview,
+            JSONObject workingDrawing,
+            int[] selectedExistingShape,
+            HashMap<Integer, double[]> movedShapeOffsets,
+            TextView status,
+            float deltaX,
+            float deltaY) {
+        int selectedShapeIndex = selectedExistingShape == null
+                || selectedExistingShape.length == 0
+                ? -1
+                : selectedExistingShape[0];
+        if (selectedShapeIndex >= 0) {
+            DrawingShapeGeometry.MoveResult result =
+                    DrawingShapeGeometry.moveShapeAndLinkedDimensions(
+                            workingDrawing,
+                            selectedShapeIndex,
+                            deltaX,
+                            deltaY);
+            if (result.moved) {
+                double[] offset = movedShapeOffsets.get(selectedShapeIndex);
+                if (offset == null) {
+                    offset = new double[]{0, 0};
+                    movedShapeOffsets.put(selectedShapeIndex, offset);
+                }
+                offset[0] += result.deltaX;
+                offset[1] += result.deltaY;
+                DrawingPieceSummary.Piece selectedPiece = DrawingPieceSummary.forShape(
+                        DrawingPieceSummary.summarize(
+                                workingDrawing,
+                                aiDrawingCalculationParts),
+                        selectedShapeIndex);
+                status.setText(
+                        (selectedPiece == null ? "Selected shape" : "Piece #" + selectedPiece.number)
+                                + " moved. Tap Save to keep its position.");
+                preview.invalidate();
+                return DrawingDragGesture.AppliedDelta.of(
+                        (float) result.deltaX,
+                        (float) result.deltaY);
+            } else {
+                status.setText("That piece is at the edge of the redraw.");
+            }
+            return DrawingDragGesture.AppliedDelta.none();
+        }
+        DrawingDragGesture.AppliedDelta rectangleMove = preview == null
+                ? DrawingDragGesture.AppliedDelta.none()
+                : preview.shiftRectangle(deltaX, deltaY);
+        if (rectangleMove.moved) {
+            status.setText("New rectangle moved. Tap Save to keep it.");
+            return rectangleMove;
+        }
+        status.setText("Tap a piece first, or draw a new rectangle.");
+        return DrawingDragGesture.AppliedDelta.none();
+    }
+
+    private void refreshVerificationEditorPreview(
+            JSONObject baselineDrawing,
+            JSONObject workingDrawing,
+            ArrayList<EditText> dimensionFields,
+            ArrayList<Integer> dimensionIndexes,
+            int[] selectedExistingShape,
+            Spinner addedAreaType,
+            EditText addedAreaLength,
+            EditText addedAreaWidth,
+            HashMap<Integer, double[]> movedShapeOffsets,
+            VerificationDrawingView preview) {
+        if (baselineDrawing == null || workingDrawing == null || preview == null) return;
+        HashMap<Integer, Double> requestedValues = new HashMap<>();
+        for (int i = 0; i < Math.min(dimensionFields.size(), dimensionIndexes.size()); i++) {
+            double value = positiveDrawingValue(dimensionFields.get(i).getText().toString());
+            if (value > 0 && value <= 10000) requestedValues.put(dimensionIndexes.get(i), value);
+        }
+
+        int selectedShapeIndex = selectedExistingShape == null
+                || selectedExistingShape.length == 0
+                ? -1
+                : selectedExistingShape[0];
+        double selectedLength = positiveDrawingValue(addedAreaLength.getText().toString());
+        double selectedWidth = positiveDrawingValue(addedAreaWidth.getText().toString());
+        boolean hasBaselineLengthDimension = false;
+        boolean hasBaselineWidthDimension = false;
+        if (selectedShapeIndex >= 0) {
+            JSONArray baselineShapes = baselineDrawing.optJSONArray("shapes");
+            JSONArray baselineDimensions = baselineDrawing.optJSONArray("dimensions");
+            JSONObject selectedShape = baselineShapes == null
+                    ? null
+                    : baselineShapes.optJSONObject(selectedShapeIndex);
+            if (selectedShape != null && baselineDimensions != null) {
+                for (int fieldIndex = 0; fieldIndex < Math.min(
+                        dimensionFields.size(),
+                        dimensionIndexes.size()); fieldIndex++) {
+                    int dimensionIndex = dimensionIndexes.get(fieldIndex);
+                    JSONObject dimension = baselineDimensions.optJSONObject(dimensionIndex);
+                    if (!DrawingShapeMeasurementEditor.matchesDimension(
+                            selectedShape,
+                            selectedShapeIndex,
+                            dimension)) continue;
+                    String role = dimension.optString("role", "");
+                    if ("length".equals(role) && selectedLength > 0) {
+                        requestedValues.put(dimensionIndex, selectedLength);
+                        hasBaselineLengthDimension = hasBaselineLengthDimension
+                                || dimension.optDouble("value_inches", 0) > 0;
+                    } else if ("width".equals(role) && selectedWidth > 0) {
+                        requestedValues.put(dimensionIndex, selectedWidth);
+                        hasBaselineWidthDimension = hasBaselineWidthDimension
+                                || dimension.optDouble("value_inches", 0) > 0;
+                    }
+                }
+            }
+        }
+
+        JSONArray previewParts;
+        try {
+            previewParts = aiDrawingCalculationParts == null
+                    ? new JSONArray()
+                    : new JSONArray(aiDrawingCalculationParts.toString());
+        } catch (Exception ignored) {
+            return;
+        }
+        JSONObject rebuilt = DrawingShapeGeometry.rebuildLinkedGeometryFromBaseline(
+                baselineDrawing,
+                previewParts,
+                requestedValues);
+        if (rebuilt == null) return;
+        JSONArray rebuiltDimensions = rebuilt.optJSONArray("dimensions");
+        if (rebuiltDimensions != null) {
+            for (Integer dimensionIndex : requestedValues.keySet()) {
+                if (dimensionIndex == null) continue;
+                JSONObject changedDimension = rebuiltDimensions.optJSONObject(dimensionIndex);
+                Double changedValue = requestedValues.get(dimensionIndex);
+                if (changedDimension != null && changedValue != null) {
+                    updatePartsFromDimension(previewParts, changedDimension, changedValue);
+                }
+            }
+        }
+
+        if (selectedShapeIndex >= 0 && selectedLength > 0 && selectedWidth > 0) {
+            DrawingShapeMeasurementEditor.Values oldValues =
+                    DrawingShapeMeasurementEditor.existingValues(
+                            baselineDrawing,
+                            previewParts,
+                            selectedShapeIndex);
+            double resizeOldLength = hasBaselineLengthDimension
+                    ? selectedLength
+                    : oldValues.length;
+            double resizeOldWidth = hasBaselineWidthDimension
+                    ? selectedWidth
+                    : oldValues.width;
+            if (!hasBaselineLengthDimension || !hasBaselineWidthDimension) {
+                JSONObject measuredGeometry =
+                        DrawingShapeGeometry.rebuildMeasuredShapeFromBaseline(
+                                rebuilt,
+                                selectedShapeIndex,
+                                resizeOldLength,
+                                resizeOldWidth,
+                                selectedLength,
+                                selectedWidth);
+                if (measuredGeometry != null) rebuilt = measuredGeometry;
+            }
+            try {
+                JSONObject previewPart = new JSONObject();
+                applyAddedAreaSelection(
+                        previewPart,
+                        Math.max(1, addedAreaType.getSelectedItemPosition()));
+                DrawingShapeMeasurementEditor.measureExisting(
+                        rebuilt,
+                        previewParts,
+                        selectedShapeIndex,
+                        selectedLength,
+                        selectedWidth,
+                        DrawingRules.featureType(previewPart),
+                        previewPart.optString("operation", "add"));
+            } catch (Exception ignored) {
+            }
+        }
+
+        applySavedShapeOffsets(rebuilt, movedShapeOffsets);
+        DrawingShapeGeometry.orthogonalizeDrawing(rebuilt);
+        replaceVerificationDrawingGeometry(workingDrawing, rebuilt);
+        preview.setCalculationParts(previewParts);
+    }
+
+    private void applySavedShapeOffsets(
+            JSONObject drawing,
+            HashMap<Integer, double[]> movedShapeOffsets) {
+        if (drawing == null || movedShapeOffsets == null || movedShapeOffsets.isEmpty()) return;
+        ArrayList<Integer> shapeIndexes = new ArrayList<>(movedShapeOffsets.keySet());
+        Collections.sort(shapeIndexes);
+        for (Integer shapeIndex : shapeIndexes) {
+            double[] offset = movedShapeOffsets.get(shapeIndex);
+            if (shapeIndex == null || offset == null || offset.length < 2) continue;
+            DrawingShapeGeometry.MoveResult applied =
+                    DrawingShapeGeometry.moveShapeAndLinkedDimensions(
+                            drawing,
+                            shapeIndex,
+                            offset[0],
+                            offset[1]);
+            offset[0] = applied.deltaX;
+            offset[1] = applied.deltaY;
+        }
+    }
+
+    private void replaceVerificationDrawingGeometry(
+            JSONObject target,
+            JSONObject source) {
+        if (target == null || source == null) return;
+        replaceVerificationDrawingArray(target, source, "shapes");
+        replaceVerificationDrawingArray(target, source, "dimensions");
+    }
+
+    private void replaceVerificationDrawingArray(
+            JSONObject target,
+            JSONObject source,
+            String key) {
+        JSONArray sourceArray = source.optJSONArray(key);
+        if (sourceArray == null) return;
+        try {
+            JSONArray copied = new JSONArray(sourceArray.toString());
+            JSONArray targetArray = target.optJSONArray(key);
+            if (targetArray == null) {
+                target.put(key, copied);
+                return;
+            }
+            while (targetArray.length() > 0) targetArray.remove(targetArray.length() - 1);
+            for (int i = 0; i < copied.length(); i++) targetArray.put(copied.get(i));
+        } catch (Exception ignored) {
+        }
+    }
+
+    private Spinner drawingChoiceSpinner(String[] choices, int selectedIndex) {
+        Spinner spinner = new Spinner(this);
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(
+                this,
+                android.R.layout.simple_spinner_item,
+                choices);
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        spinner.setAdapter(adapter);
+        spinner.setSelection(Math.max(0, Math.min(selectedIndex, choices.length - 1)));
+        spinner.setPadding(dp(8), dp(4), dp(8), dp(4));
+        return spinner;
+    }
+
     private TextView editorSectionTitle(String text) {
         TextView title = sectionHeader(text);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
@@ -2913,13 +6480,55 @@ public class MainActivity extends Activity {
         return title;
     }
 
+    private ArrayList<Integer> orderedDrawingDimensionIndexes(
+            JSONObject drawing,
+            JSONArray calculationParts) {
+        ArrayList<Integer> ordered = new ArrayList<>();
+        HashSet<Integer> used = new HashSet<>();
+        for (DrawingPieceSummary.Piece piece : DrawingPieceSummary.summarize(
+                drawing,
+                calculationParts)) {
+            int lengthIndex = DrawingPieceSummary.firstDimensionIndex(
+                    drawing,
+                    piece,
+                    "length",
+                    used);
+            if (lengthIndex >= 0 && used.add(lengthIndex)) ordered.add(lengthIndex);
+            int widthIndex = DrawingPieceSummary.firstDimensionIndex(
+                    drawing,
+                    piece,
+                    "width",
+                    used);
+            if (widthIndex >= 0 && used.add(widthIndex)) ordered.add(widthIndex);
+        }
+        JSONArray dimensions = drawing == null ? null : drawing.optJSONArray("dimensions");
+        if (dimensions != null) {
+            for (int i = 0; i < Math.min(dimensions.length(), 50); i++) {
+                if (dimensions.optJSONObject(i) != null && used.add(i)) ordered.add(i);
+            }
+        }
+        return ordered;
+    }
+
     private void saveVerificationEdits(
             Dialog dialog,
             ArrayList<EditText> dimensionFields,
             ArrayList<Double> originalDimensionValues,
             ArrayList<Integer> dimensionIndexes,
             ArrayList<Integer> editableShapeIndexes,
-            ArrayList<EditText> shapeLabelFields) {
+            ArrayList<Spinner> shapeTypeFields,
+            ArrayList<Integer> originalShapeSelections,
+            ArrayList<EditText> shapeLabelFields,
+            CheckBox allowUnlinkedPictureOnly,
+            ArrayList<Spinner> areaRuleFields,
+            ArrayList<Integer> areaRulePartIndexes,
+            ArrayList<Integer> originalAreaSelections,
+            Spinner addedAreaType,
+            EditText addedAreaLength,
+            EditText addedAreaWidth,
+            float[] drawnRectangle,
+            int[] selectedExistingShape,
+            HashMap<Integer, double[]> movedShapeOffsets) {
         if (aiVerificationDrawing == null) {
             dialog.dismiss();
             Toast.makeText(this, "The AI redraw is no longer available.", Toast.LENGTH_LONG).show();
@@ -2933,6 +6542,7 @@ public class MainActivity extends Activity {
             candidateParts = aiDrawingCalculationParts == null
                     ? new JSONArray()
                     : new JSONArray(aiDrawingCalculationParts.toString());
+            DrawingShapeGeometry.orthogonalizeDrawing(candidateDrawing);
         } catch (Exception e) {
             Toast.makeText(this, "The redraw changes could not be prepared.", Toast.LENGTH_LONG).show();
             return;
@@ -2940,9 +6550,37 @@ public class MainActivity extends Activity {
 
         JSONArray dimensions = candidateDrawing.optJSONArray("dimensions");
         if (dimensions == null) dimensions = new JSONArray();
+        int selectedShapeIndex = selectedExistingShape == null
+                || selectedExistingShape.length == 0
+                ? -1
+                : selectedExistingShape[0];
+        if (selectedShapeIndex >= 0) {
+            double selectedLength = positiveDrawingValue(addedAreaLength.getText().toString());
+            double selectedWidth = positiveDrawingValue(addedAreaWidth.getText().toString());
+            if (selectedLength <= 0 || selectedLength > 10000
+                    || selectedWidth <= 0 || selectedWidth > 10000) {
+                Toast.makeText(
+                        this,
+                        "Enter the selected piece's exact length and width in inches.",
+                        Toast.LENGTH_LONG).show();
+                return;
+            }
+            syncSelectedShapeDimensionFields(
+                    candidateDrawing,
+                    selectedShapeIndex,
+                    selectedLength,
+                    selectedWidth,
+                    dimensionFields,
+                    dimensionIndexes);
+        }
         if (dimensionFields.size() != originalDimensionValues.size()
                 || dimensionFields.size() != dimensionIndexes.size()) {
             Toast.makeText(this, "The redraw fields could not be matched.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (areaRuleFields.size() != areaRulePartIndexes.size()
+                || areaRuleFields.size() != originalAreaSelections.size()) {
+            Toast.makeText(this, "The square-foot controls could not be matched.", Toast.LENGTH_LONG).show();
             return;
         }
 
@@ -2962,6 +6600,25 @@ public class MainActivity extends Activity {
             enteredDimensionValues.add(entered);
         }
 
+        HashMap<Integer, Double> requestedDimensionValues = new HashMap<>();
+        for (int fieldIndex = 0; fieldIndex < enteredDimensionValues.size(); fieldIndex++) {
+            requestedDimensionValues.put(
+                    dimensionIndexes.get(fieldIndex),
+                    enteredDimensionValues.get(fieldIndex));
+        }
+        JSONObject proportionedDrawing = DrawingShapeGeometry.rebuildLinkedGeometryFromBaseline(
+                candidateDrawing,
+                candidateParts,
+                requestedDimensionValues);
+        if (proportionedDrawing == null) {
+            Toast.makeText(
+                    this,
+                    "Two fields control the same measurement. Enter the same number in both fields.",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        replaceVerificationDrawingGeometry(candidateDrawing, proportionedDrawing);
+
         ArrayList<String> enteredLabels = new ArrayList<>();
         for (int i = 0; i < shapeLabelFields.size(); i++) {
             String labelText = cleanDrawingLabel(shapeLabelFields.get(i).getText().toString());
@@ -2973,9 +6630,277 @@ public class MainActivity extends Activity {
             enteredLabels.add(labelText);
         }
 
+        JSONArray candidateShapes = candidateDrawing.optJSONArray("shapes");
+        if (shapeLabelFields.size() != editableShapeIndexes.size()
+                || shapeTypeFields.size() != editableShapeIndexes.size()
+                || originalShapeSelections.size() != editableShapeIndexes.size()
+                || candidateShapes == null && !shapeLabelFields.isEmpty()) {
+            Toast.makeText(this, "The redraw label fields could not be matched.", Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        boolean shapeHandlingChanged = false;
+        JSONObject unlinkedChangedShape = null;
+        int unlinkedChangedShapeSelection = -1;
+        for (int i = 0; i < enteredLabels.size(); i++) {
+            JSONObject shape = candidateShapes.optJSONObject(editableShapeIndexes.get(i));
+            if (shape == null) {
+                Toast.makeText(this, "One redraw label location is no longer available.", Toast.LENGTH_LONG).show();
+                return;
+            }
+            int selectedShapeType = shapeTypeFields.get(i).getSelectedItemPosition();
+            boolean shapeTypeChanged = selectedShapeType != originalShapeSelections.get(i);
+            if (shapeTypeChanged) {
+                DrawingRules.applyShapeEditorSelection(shape, selectedShapeType);
+                int linkedPartIndex = applyLinkedShapeHandling(
+                        shape,
+                        candidateParts,
+                        selectedShapeType);
+                if (linkedPartIndex == DrawingRules.LINK_AMBIGUOUS) {
+                    Toast.makeText(
+                            this,
+                            "That shape matches more than one calculation piece. Re-run AI before changing its type so no quote math is changed incorrectly.",
+                            Toast.LENGTH_LONG).show();
+                    return;
+                }
+                if (linkedPartIndex == DrawingRules.LINK_NOT_FOUND) {
+                    if (unlinkedChangedShape != null) {
+                        Toast.makeText(
+                                this,
+                                "Only one unlinked shape can be paired with one added correction at a time. Save one correction, then edit again.",
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    unlinkedChangedShape = shape;
+                    unlinkedChangedShapeSelection = selectedShapeType;
+                } else {
+                    shapeHandlingChanged = true;
+                }
+            }
+            try {
+                String labelText = enteredLabels.get(i);
+                if (labelText.isEmpty()) shape.remove("user_label");
+                else shape.put("user_label", labelText);
+            } catch (Exception ignored) {
+            }
+        }
+
+        boolean handlingChanged = shapeHandlingChanged;
+        ArrayList<Integer> changedAreaPartIndexes = new ArrayList<>();
+        ArrayList<Integer> changedPartsWithoutShape = new ArrayList<>();
+        for (int i = 0; i < areaRuleFields.size(); i++) {
+            int partIndex = areaRulePartIndexes.get(i);
+            JSONObject part = candidateParts.optJSONObject(partIndex);
+            if (part == null) {
+                Toast.makeText(this, "One calculation piece is no longer available.", Toast.LENGTH_LONG).show();
+                return;
+            }
+            int selection = areaRuleFields.get(i).getSelectedItemPosition();
+            if (selection != originalAreaSelections.get(i)) {
+                handlingChanged = true;
+                DrawingRules.applyAreaEditorSelection(part, selection);
+                changedAreaPartIndexes.add(partIndex);
+                int linkedShapeIndex = synchronizeLinkedShapeHandling(
+                        part,
+                        candidateShapes,
+                        selection);
+                if (linkedShapeIndex == DrawingRules.LINK_AMBIGUOUS) {
+                    Toast.makeText(
+                            this,
+                            "That calculation piece matches more than one redraw shape. Re-run AI before changing its square-foot handling.",
+                            Toast.LENGTH_LONG).show();
+                    return;
+                }
+                if (linkedShapeIndex == DrawingRules.LINK_NOT_FOUND) {
+                    changedPartsWithoutShape.add(partIndex);
+                }
+            }
+        }
+
+        int addedAreaSelection = addedAreaType.getSelectedItemPosition();
+        boolean hasDrawnRectangle = hasDrawnRectangle(drawnRectangle);
+        if ((hasDrawnRectangle || selectedShapeIndex >= 0) && addedAreaSelection == 0) {
+            Toast.makeText(
+                    this,
+                    "Choose whether the selected piece is a countertop or backsplash.",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (unlinkedChangedShape != null) {
+            int targetAreaSelection = areaSelectionForShape(unlinkedChangedShapeSelection);
+            int compatiblePartIndex = findCompatibleUnlinkedPart(
+                    candidateParts,
+                    candidateShapes,
+                    targetAreaSelection,
+                    changedAreaPartIndexes);
+            if (compatiblePartIndex >= 0) {
+                if (addedAreaMatchesShapeSelection(
+                        addedAreaSelection,
+                        unlinkedChangedShapeSelection)) {
+                    Toast.makeText(
+                            this,
+                            "A matching calculation piece already exists. Clear the added correction so this opening is not counted twice.",
+                            Toast.LENGTH_LONG).show();
+                    return;
+                }
+                try {
+                    String linkId = nextUserLinkId(candidateParts, candidateShapes);
+                    unlinkedChangedShape.put("link_id", linkId);
+                    candidateParts.optJSONObject(compatiblePartIndex).put("link_id", linkId);
+                    changedPartsWithoutShape.remove(Integer.valueOf(compatiblePartIndex));
+                    unlinkedChangedShape = null;
+                } catch (Exception ignored) {
+                    Toast.makeText(this, "The shape and calculation piece could not be linked.", Toast.LENGTH_LONG).show();
+                    return;
+                }
+            } else if (compatiblePartIndex == DrawingRules.LINK_AMBIGUOUS) {
+                if (!allowUnlinkedPictureOnly.isChecked() || addedAreaSelection > 0) {
+                    Toast.makeText(
+                            this,
+                            "More than one calculation piece could match that shape. Check picture-only and clear the added correction, or re-run AI.",
+                            Toast.LENGTH_LONG).show();
+                    return;
+                }
+                unlinkedChangedShape = null;
+            } else if (!addedAreaMatchesShapeSelection(
+                    addedAreaSelection,
+                    unlinkedChangedShapeSelection)) {
+                if (allowUnlinkedPictureOnly.isChecked()) {
+                    unlinkedChangedShape = null;
+                } else {
+                    Toast.makeText(
+                            this,
+                            "That shape is not linked to one calculation piece. Choose a matching existing formula type, add the matching missing correction, or check picture-only.",
+                            Toast.LENGTH_LONG).show();
+                    return;
+                }
+            }
+        }
+        boolean addedCorrectionWithoutShape = false;
+        if (addedAreaSelection > 0) {
+            if (selectedShapeIndex < 0 && candidateParts.length() >= 40) {
+                Toast.makeText(
+                        this,
+                        "This drawing already has the maximum number of calculation pieces.",
+                        Toast.LENGTH_LONG).show();
+                return;
+            }
+            double length = positiveDrawingValue(addedAreaLength.getText().toString());
+            double width = positiveDrawingValue(addedAreaWidth.getText().toString());
+            if (length <= 0 || length > 10000) {
+                addedAreaLength.requestFocus();
+                Toast.makeText(
+                        this,
+                        "Enter the missing area's length as a number from 0 to 10,000 inches.",
+                        Toast.LENGTH_LONG).show();
+                return;
+            }
+            if (width <= 0 || width > 10000) {
+                addedAreaWidth.requestFocus();
+                Toast.makeText(
+                        this,
+                        "Enter the missing area's width as a number from 0 to 10,000 inches.",
+                        Toast.LENGTH_LONG).show();
+                return;
+            }
+            try {
+                if (selectedShapeIndex >= 0) {
+                    boolean hasLengthDimension = hasLinkedShapeDimensionRole(
+                            aiVerificationDrawing,
+                            selectedShapeIndex,
+                            "length");
+                    boolean hasWidthDimension = hasLinkedShapeDimensionRole(
+                            aiVerificationDrawing,
+                            selectedShapeIndex,
+                            "width");
+                    if (!hasLengthDimension || !hasWidthDimension) {
+                        DrawingShapeMeasurementEditor.Values oldValues =
+                                DrawingShapeMeasurementEditor.existingValues(
+                                        aiVerificationDrawing,
+                                        aiDrawingCalculationParts,
+                                        selectedShapeIndex);
+                        JSONObject measuredGeometry =
+                                DrawingShapeGeometry.rebuildMeasuredShapeFromBaseline(
+                                        candidateDrawing,
+                                        selectedShapeIndex,
+                                        hasLengthDimension ? length : oldValues.length,
+                                        hasWidthDimension ? width : oldValues.width,
+                                        length,
+                                        width);
+                        if (measuredGeometry == null) {
+                            Toast.makeText(
+                                    this,
+                                    "That selected piece could not be resized to those measurements.",
+                                    Toast.LENGTH_LONG).show();
+                            return;
+                        }
+                        replaceVerificationDrawingGeometry(
+                                candidateDrawing,
+                                measuredGeometry);
+                    }
+                    JSONObject measuredPart = new JSONObject();
+                    applyAddedAreaSelection(measuredPart, addedAreaSelection);
+                    if (!DrawingShapeMeasurementEditor.measureExisting(
+                            candidateDrawing,
+                            candidateParts,
+                            selectedShapeIndex,
+                            length,
+                            width,
+                            DrawingRules.featureType(measuredPart),
+                            measuredPart.optString("operation", "add"))) {
+                        Toast.makeText(
+                                this,
+                                "That selected piece could not be connected to the measurements.",
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                } else {
+                    JSONObject addedPart = new JSONObject();
+                    String addedPartId = nextUserAreaId(candidateParts);
+                    addedPart.put("id", addedPartId);
+                    addedPart.put("length_inches", length);
+                    addedPart.put("width_inches", width);
+                    addedPart.put("quantity", 1);
+                    addedPart.put("user_added", true);
+                    if (unlinkedChangedShape != null) {
+                        unlinkedChangedShape.put("link_id", addedPartId);
+                        addedPart.put("link_id", addedPartId);
+                    } else {
+                        addedCorrectionWithoutShape = !hasDrawnRectangle;
+                    }
+                    applyAddedAreaSelection(addedPart, addedAreaSelection);
+                    if (hasDrawnRectangle) {
+                        String feature = DrawingRules.featureType(addedPart);
+                        if (!DrawingRectangleFactory.append(
+                                candidateDrawing,
+                                addedPartId,
+                                feature,
+                                drawnRectangle[0],
+                                drawnRectangle[1],
+                                drawnRectangle[2],
+                                drawnRectangle[3],
+                                length,
+                                width)) {
+                            Toast.makeText(
+                                    this,
+                                    "Draw a larger rectangle or remove another redraw shape before saving.",
+                                    Toast.LENGTH_LONG).show();
+                            return;
+                        }
+                        addedPart.put("link_id", addedPartId);
+                    }
+                    candidateParts.put(addedPart);
+                }
+            } catch (Exception ignored) {
+                Toast.makeText(this, "The added area could not be saved.", Toast.LENGTH_LONG).show();
+                return;
+            }
+            handlingChanged = true;
+        }
+
         // Duplicate arrows that control the same formula value must receive the same correction.
         HashMap<String, Double> changedTargets = new HashMap<>();
-        boolean calculationChanged = false;
+        boolean dimensionCalculationChanged = false;
         for (int fieldIndex = 0; fieldIndex < dimensionFields.size(); fieldIndex++) {
             JSONObject dimension = dimensions.optJSONObject(dimensionIndexes.get(fieldIndex));
             if (dimension == null) {
@@ -3007,7 +6932,7 @@ public class MainActivity extends Activity {
                         Toast.LENGTH_LONG).show();
                 return;
             }
-            calculationChanged = calculationChanged || affectsCalculation;
+            dimensionCalculationChanged = dimensionCalculationChanged || affectsCalculation;
         }
 
         for (int fieldIndex = 0; fieldIndex < dimensionFields.size(); fieldIndex++) {
@@ -3040,13 +6965,14 @@ public class MainActivity extends Activity {
 
         double updatedSquareFeet = aiDrawingSquareFeet;
         String updatedExplanation = aiDrawingExplanation;
+        boolean calculationChanged = handlingChanged || dimensionCalculationChanged;
         if (calculationChanged) {
             synchronizeLinkedDrawingDimensions(candidateDrawing, candidateParts);
-            if (!changedDimensionTargetsMatchDrawing(
+            if (dimensionCalculationChanged
+                    && !changedDimensionTargetsMatchDrawing(
                     candidateDrawing,
                     candidateParts,
-                    changedTargets)
-                    || !drawingCoversCalculationParts(candidateDrawing, candidateParts)) {
+                    changedTargets)) {
                 Toast.makeText(
                         this,
                         "Those edits made two linked measurements disagree. Check the dimension fields.",
@@ -3064,40 +6990,32 @@ public class MainActivity extends Activity {
             updatedExplanation = buildEditedDrawingExplanation(candidateParts, updatedSquareFeet);
         }
 
-        JSONArray candidateShapes = candidateDrawing.optJSONArray("shapes");
-        if (shapeLabelFields.size() != editableShapeIndexes.size()
-                || candidateShapes == null && !shapeLabelFields.isEmpty()) {
-            Toast.makeText(this, "The redraw label fields could not be matched.", Toast.LENGTH_LONG).show();
-            return;
-        }
-        for (int i = 0; i < enteredLabels.size(); i++) {
-            JSONObject shape = candidateShapes.optJSONObject(editableShapeIndexes.get(i));
-            if (shape == null) {
-                Toast.makeText(this, "One redraw label location is no longer available.", Toast.LENGTH_LONG).show();
-                return;
-            }
-            try {
-                String labelText = enteredLabels.get(i);
-                if (labelText.isEmpty()) shape.remove("user_label");
-                else shape.put("user_label", labelText);
-            } catch (Exception ignored) {
-            }
-        }
-
         if (calculationChanged) {
             aiDrawingSquareFeet = updatedSquareFeet;
             aiDrawingCanCalculate = true;
-            aiDrawingEditedByUser = true;
             aiDrawingExplanation = updatedExplanation;
+            aiDrawingMissingInformation = "";
         }
+        applySavedShapeOffsets(candidateDrawing, movedShapeOffsets);
+        DrawingShapeGeometry.orthogonalizeDrawing(candidateDrawing);
+        aiDrawingEditedByUser = true;
         aiDrawingCalculationParts = candidateParts;
         aiVerificationDrawing = candidateDrawing;
         verificationDrawingView.setVerificationDrawing(candidateDrawing);
+        verificationDrawingView.setCalculationParts(candidateParts);
+        persistDrawingState();
         updateDrawingStatusText();
         calculateAndDisplay(false);
         dialog.dismiss();
         showStep();
-        Toast.makeText(this, "Redraw saved.", Toast.LENGTH_SHORT).show();
+        boolean hasUnmatchedFormulaVisual = !changedPartsWithoutShape.isEmpty()
+                || addedCorrectionWithoutShape;
+        Toast.makeText(
+                this,
+                hasUnmatchedFormulaVisual
+                        ? "Redraw saved. One square-foot correction has no matching shape, so verify the picture and formula separately."
+                        : "Redraw saved.",
+                hasUnmatchedFormulaVisual ? Toast.LENGTH_LONG : Toast.LENGTH_SHORT).show();
     }
 
     private double positiveDrawingValue(String text) {
@@ -3121,67 +7039,307 @@ public class MainActivity extends Activity {
         return measurementValue(inches) + "\"";
     }
 
-    private String dimensionEditorDescription(
-            JSONObject dimension,
-            JSONObject drawing,
-            int numberIndex) {
-        double canvasWidth = drawing.optDouble("canvas_width", 1000);
-        double canvasHeight = drawing.optDouble("canvas_height", 700);
-        double x1 = dimension.optDouble("x1", 0);
-        double y1 = dimension.optDouble("y1", 0);
-        double x2 = dimension.optDouble("x2", 0);
-        double y2 = dimension.optDouble("y2", 0);
-        String position = drawingPosition((x1 + x2) / 2, (y1 + y2) / 2, canvasWidth, canvasHeight);
-        String direction = Math.abs(x2 - x1) >= Math.abs(y2 - y1)
-                ? "horizontal"
-                : "vertical";
-        String role = dimension.optString("role", "other");
-        String purpose;
-        if ("length".equals(role)) purpose = "length";
-        else if ("width".equals(role)) purpose = "width";
-        else if ("both".equals(role)) purpose = "length and width";
-        else purpose = "reference only";
-        return "Dimension " + numberIndex + " — " + position + " " + direction + " " + purpose;
+    private String calculationPartDescription(JSONObject part, int numberIndex) {
+        double length = part.optDouble("length_inches", 0);
+        double width = part.optDouble("width_inches", 0);
+        double quantityValue = part.optDouble("quantity", 1);
+        StringBuilder description = new StringBuilder("Calculation piece ")
+                .append(numberIndex)
+                .append(" — ")
+                .append(measurementValue(length))
+                .append(" × ")
+                .append(measurementValue(width))
+                .append(" in");
+        if (Math.abs(quantityValue - 1) > 0.0001) {
+            description.append(" × ").append(measurementValue(quantityValue));
+        }
+        return description.toString();
     }
 
-    private String shapeEditorDescription(JSONObject shape, JSONObject drawing, int numberIndex) {
-        JSONArray points = shape.optJSONArray("points");
-        double centerX = 0;
-        double centerY = 0;
-        int count = 0;
-        if (points != null) {
-            for (int i = 0; i < Math.min(points.length(), 16); i++) {
-                JSONObject point = points.optJSONObject(i);
-                if (point == null) continue;
-                centerX += point.optDouble("x", 0);
-                centerY += point.optDouble("y", 0);
-                count++;
+    private int applyLinkedShapeHandling(
+            JSONObject shape,
+            JSONArray calculationParts,
+            int shapeSelection) {
+        int partIndex = DrawingRules.uniqueLinkedIndex(shape, calculationParts);
+        if (partIndex < 0) return partIndex;
+        DrawingRules.applyAreaEditorSelection(
+                calculationParts.optJSONObject(partIndex),
+                areaSelectionForShape(shapeSelection));
+        return partIndex;
+    }
+
+    private int synchronizeLinkedShapeHandling(
+            JSONObject part,
+            JSONArray shapes,
+            int areaSelection) {
+        int shapeIndex = DrawingRules.uniqueLinkedIndex(part, shapes);
+        if (shapeIndex < 0) return shapeIndex;
+        JSONObject shape = shapes.optJSONObject(shapeIndex);
+        if (shape == null) return DrawingRules.LINK_NOT_FOUND;
+        int shapeSelection;
+        if (areaSelection == DrawingRules.AREA_IGNORE_SINK_OR_COOKTOP) {
+            shapeSelection = DrawingRules.shapeEditorSelection(shape)
+                    == DrawingRules.SHAPE_COOKTOP
+                    ? DrawingRules.SHAPE_COOKTOP
+                    : DrawingRules.SHAPE_SINK;
+        } else if (areaSelection == DrawingRules.AREA_DEDUCT_STOVE) {
+            shapeSelection = DrawingRules.SHAPE_STOVE;
+        } else if (areaSelection == DrawingRules.AREA_DEDUCT_OTHER) {
+            shapeSelection = DrawingRules.SHAPE_OTHER_OPENING;
+        } else {
+            shapeSelection = DrawingRules.SHAPE_COUNTERTOP;
+        }
+        DrawingRules.applyShapeEditorSelection(shape, shapeSelection);
+        return shapeIndex;
+    }
+
+    private int areaSelectionForShape(int shapeSelection) {
+        if (shapeSelection == DrawingRules.SHAPE_SINK
+                || shapeSelection == DrawingRules.SHAPE_COOKTOP) {
+            return DrawingRules.AREA_IGNORE_SINK_OR_COOKTOP;
+        }
+        if (shapeSelection == DrawingRules.SHAPE_STOVE) {
+            return DrawingRules.AREA_DEDUCT_STOVE;
+        }
+        if (shapeSelection == DrawingRules.SHAPE_OTHER_OPENING) {
+            return DrawingRules.AREA_DEDUCT_OTHER;
+        }
+        return DrawingRules.AREA_INCLUDE;
+    }
+
+    private boolean addedAreaMatchesShapeSelection(
+            int addedAreaSelection,
+            int shapeSelection) {
+        if (shapeSelection == DrawingRules.SHAPE_COUNTERTOP) return addedAreaSelection == 1;
+        if (shapeSelection == DrawingRules.SHAPE_SINK
+                || shapeSelection == DrawingRules.SHAPE_COOKTOP) return addedAreaSelection == 3;
+        if (shapeSelection == DrawingRules.SHAPE_STOVE) return addedAreaSelection == 4;
+        if (shapeSelection == DrawingRules.SHAPE_OTHER_OPENING) return addedAreaSelection == 5;
+        return false;
+    }
+
+    private void showDrawingDimensionEditor(
+            JSONObject workingDrawing,
+            JSONObject dimension,
+            EditText linkedField,
+            VerificationDrawingView preview) {
+        double currentValue = dimension.optDouble("value_inches", 0);
+        EditText valueField = input("Inches", decimalInput());
+        if (currentValue > 0) valueField.setText(measurementValue(currentValue));
+        valueField.setSelectAllOnFocus(true);
+        valueField.setImeOptions(EditorInfo.IME_ACTION_DONE);
+
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(20), dp(8), dp(20), 0);
+        TextView help = label("Enter the corrected measurement in inches.");
+        help.setTextSize(15);
+        content.addView(help);
+        content.addView(valueField);
+
+        AlertDialog editDialog = new AlertDialog.Builder(this)
+                .setTitle("Change " + formatDrawingDimension(currentValue) + " dimension")
+                .setView(content)
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Update", null)
+                .create();
+        editDialog.setOnShowListener(ignored -> {
+            editDialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+                double entered = positiveDrawingValue(valueField.getText().toString());
+                if (entered <= 0 || entered > 10000) {
+                    valueField.requestFocus();
+                    Toast.makeText(
+                            this,
+                            "Enter a measurement greater than 0 and no more than 10,000 inches.",
+                            Toast.LENGTH_LONG).show();
+                    return;
+                }
+                try {
+                    dimension.put("value_inches", entered);
+                    dimension.put("label", formatDrawingDimension(entered));
+                } catch (Exception ignoredException) {
+                }
+                linkedField.setText(measurementValue(entered));
+                preview.invalidate();
+                editDialog.dismiss();
+            });
+            valueField.requestFocus();
+            valueField.selectAll();
+            valueField.postDelayed(() -> showKeyboard(valueField), 150);
+        });
+        editDialog.show();
+    }
+
+    private void applyAddedAreaSelection(JSONObject part, int selection) {
+        if (part == null) return;
+        if (selection == 2) {
+            try {
+                part.put("feature_type", DrawingRules.FEATURE_BACKSPLASH);
+                part.put("operation", "add");
+            } catch (Exception ignored) {
+            }
+            return;
+        }
+        int areaSelection;
+        if (selection == 3) areaSelection = DrawingRules.AREA_IGNORE_SINK_OR_COOKTOP;
+        else if (selection == 4) areaSelection = DrawingRules.AREA_DEDUCT_STOVE;
+        else if (selection == 5) areaSelection = DrawingRules.AREA_DEDUCT_OTHER;
+        else areaSelection = DrawingRules.AREA_INCLUDE;
+        DrawingRules.applyAreaEditorSelection(part, areaSelection);
+    }
+
+    private int addedAreaSelectionForFeature(JSONObject shape) {
+        String feature = DrawingRules.featureType(shape);
+        if (DrawingRules.FEATURE_BACKSPLASH.equals(feature)) return 2;
+        if (DrawingRules.FEATURE_SINK.equals(feature)
+                || DrawingRules.FEATURE_COOKTOP.equals(feature)) return 3;
+        if (DrawingRules.FEATURE_STOVE.equals(feature)) return 4;
+        if ("opening".equals(shape == null ? "" : shape.optString("kind", ""))) return 5;
+        return 1;
+    }
+
+    private void syncSelectedShapeDimensionFields(
+            JSONObject drawing,
+            int shapeIndex,
+            double length,
+            double width,
+            ArrayList<EditText> dimensionFields,
+            ArrayList<Integer> dimensionIndexes) {
+        JSONArray shapes = drawing == null ? null : drawing.optJSONArray("shapes");
+        JSONArray dimensions = drawing == null ? null : drawing.optJSONArray("dimensions");
+        JSONObject shape = shapes == null ? null : shapes.optJSONObject(shapeIndex);
+        if (shape == null || dimensions == null) return;
+        for (int fieldIndex = 0; fieldIndex < Math.min(
+                dimensionFields.size(),
+                dimensionIndexes.size()); fieldIndex++) {
+            JSONObject dimension = dimensions.optJSONObject(dimensionIndexes.get(fieldIndex));
+            if (!DrawingShapeMeasurementEditor.matchesDimension(
+                    shape,
+                    shapeIndex,
+                    dimension)) continue;
+            String role = dimension.optString("role", "");
+            if ("length".equals(role)) {
+                dimensionFields.get(fieldIndex).setText(measurementValue(length));
+            } else if ("width".equals(role)) {
+                dimensionFields.get(fieldIndex).setText(measurementValue(width));
             }
         }
-        if (count > 0) {
-            centerX /= count;
-            centerY /= count;
-        }
-        double canvasWidth = drawing.optDouble("canvas_width", 1000);
-        double canvasHeight = drawing.optDouble("canvas_height", 700);
-        String kind = "opening".equals(shape.optString("kind")) ? "opening" : "countertop piece";
-        return "Optional label " + numberIndex + " — "
-                + drawingPosition(centerX, centerY, canvasWidth, canvasHeight)
-                + " " + kind;
     }
 
-    private String drawingPosition(
-            double centerX,
-            double centerY,
-            double canvasWidth,
-            double canvasHeight) {
-        String vertical = centerY < canvasHeight * 0.36
-                ? "top"
-                : centerY > canvasHeight * 0.64 ? "bottom" : "middle";
-        String horizontal = centerX < canvasWidth * 0.36
-                ? "left"
-                : centerX > canvasWidth * 0.64 ? "right" : "center";
-        return vertical + "-" + horizontal;
+    private boolean hasLinkedShapeDimensionRole(
+            JSONObject drawing,
+            int shapeIndex,
+            String role) {
+        JSONArray shapes = drawing == null ? null : drawing.optJSONArray("shapes");
+        JSONArray dimensions = drawing == null ? null : drawing.optJSONArray("dimensions");
+        JSONObject shape = shapes == null ? null : shapes.optJSONObject(shapeIndex);
+        if (shape == null || dimensions == null) return false;
+        for (int i = 0; i < Math.min(50, dimensions.length()); i++) {
+            JSONObject dimension = dimensions.optJSONObject(i);
+            if (role.equals(dimension == null ? "" : dimension.optString("role", ""))
+                    && dimension.optDouble("value_inches", 0) > 0
+                    && DrawingShapeMeasurementEditor.matchesDimension(
+                    shape,
+                    shapeIndex,
+                    dimension)) return true;
+        }
+        return false;
+    }
+
+    private boolean hasDrawnRectangle(float[] rectangle) {
+        if (rectangle == null || rectangle.length < 4) return false;
+        for (float value : rectangle) {
+            if (Float.isNaN(value) || Float.isInfinite(value)) return false;
+        }
+        return Math.abs(rectangle[2] - rectangle[0]) >= 5
+                && Math.abs(rectangle[3] - rectangle[1]) >= 5;
+    }
+
+    private int findCompatibleUnlinkedPart(
+            JSONArray parts,
+            JSONArray shapes,
+            int targetAreaSelection,
+            ArrayList<Integer> changedPartIndexes) {
+        int preferred = uniqueCompatiblePart(
+                parts,
+                shapes,
+                targetAreaSelection,
+                changedPartIndexes);
+        if (preferred != DrawingRules.LINK_NOT_FOUND) return preferred;
+        return uniqueCompatiblePart(parts, shapes, targetAreaSelection, null);
+    }
+
+    private int uniqueCompatiblePart(
+            JSONArray parts,
+            JSONArray shapes,
+            int targetAreaSelection,
+            ArrayList<Integer> restrictedIndexes) {
+        if (parts == null) return DrawingRules.LINK_NOT_FOUND;
+        int match = DrawingRules.LINK_NOT_FOUND;
+        int limit = restrictedIndexes == null
+                ? Math.min(parts.length(), 40)
+                : restrictedIndexes.size();
+        for (int position = 0; position < limit; position++) {
+            int partIndex = restrictedIndexes == null
+                    ? position
+                    : restrictedIndexes.get(position);
+            JSONObject part = parts.optJSONObject(partIndex);
+            if (part == null
+                    || DrawingRules.areaEditorSelection(part) != targetAreaSelection
+                    || DrawingRules.uniqueLinkedIndex(part, shapes)
+                    != DrawingRules.LINK_NOT_FOUND) continue;
+            if (match != DrawingRules.LINK_NOT_FOUND) return DrawingRules.LINK_AMBIGUOUS;
+            match = partIndex;
+        }
+        return match;
+    }
+
+    private String nextUserLinkId(JSONArray parts, JSONArray shapes) {
+        int number = 1;
+        while (true) {
+            String candidate = "user_link_" + number;
+            boolean exists = false;
+            if (parts != null) {
+                for (int i = 0; i < Math.min(parts.length(), 40); i++) {
+                    JSONObject part = parts.optJSONObject(i);
+                    if (part != null && candidate.equals(part.optString("link_id", ""))) {
+                        exists = true;
+                        break;
+                    }
+                }
+            }
+            if (!exists && shapes != null) {
+                for (int i = 0; i < Math.min(shapes.length(), 24); i++) {
+                    JSONObject shape = shapes.optJSONObject(i);
+                    if (shape != null && candidate.equals(shape.optString("link_id", ""))) {
+                        exists = true;
+                        break;
+                    }
+                }
+            }
+            if (!exists) return candidate;
+            number++;
+        }
+    }
+
+    private String nextUserAreaId(JSONArray parts) {
+        int number = Math.max(1, parts == null ? 1 : parts.length() + 1);
+        while (true) {
+            String candidate = "user_area_" + number;
+            boolean exists = false;
+            if (parts != null) {
+                for (int i = 0; i < Math.min(parts.length(), 40); i++) {
+                    JSONObject part = parts.optJSONObject(i);
+                    if (part != null && (candidate.equals(part.optString("id", ""))
+                            || candidate.equals(part.optString("link_id", "")))) {
+                        exists = true;
+                        break;
+                    }
+                }
+            }
+            if (!exists) return candidate;
+            number++;
+        }
     }
 
     private boolean registerChangedDimensionTargets(
@@ -3254,53 +7412,6 @@ public class MainActivity extends Activity {
             }
         }
         return true;
-    }
-
-    private boolean drawingCoversCalculationParts(JSONObject drawing, JSONArray parts) {
-        JSONArray dimensions = drawing.optJSONArray("dimensions");
-        if (dimensions == null || parts == null || parts.length() == 0) return false;
-        for (int partIndex = 0; partIndex < Math.min(parts.length(), 40); partIndex++) {
-            JSONObject part = parts.optJSONObject(partIndex);
-            if (part == null) return false;
-            String partId = part.optString("id", "");
-            String operation = part.optString("operation", "");
-            double length = part.optDouble("length_inches", Double.NaN);
-            double width = part.optDouble("width_inches", Double.NaN);
-            double quantityValue = part.optDouble("quantity", Double.NaN);
-            if (partId.isEmpty()
-                    || !("add".equals(operation) || "subtract".equals(operation))
-                    || !isFiniteDrawingNumber(length)
-                    || !isFiniteDrawingNumber(width)
-                    || !isFiniteDrawingNumber(quantityValue)
-                    || length <= 0
-                    || width <= 0
-                    || quantityValue <= 0) return false;
-            boolean hasLength = false;
-            boolean hasWidth = false;
-            for (int dimensionIndex = 0;
-                 dimensionIndex < Math.min(dimensions.length(), 50);
-                 dimensionIndex++) {
-                JSONObject dimension = dimensions.optJSONObject(dimensionIndex);
-                if (dimension == null || !dimensionContainsPartId(dimension, partId)) continue;
-                double displayed = dimension.optDouble("value_inches", Double.NaN);
-                String role = dimension.optString("role", "other");
-                if (("length".equals(role) || "both".equals(role))
-                        && Math.abs(displayed - length) <= 0.05) hasLength = true;
-                if (("width".equals(role) || "both".equals(role))
-                        && Math.abs(displayed - width) <= 0.05) hasWidth = true;
-            }
-            if (!hasLength || !hasWidth) return false;
-        }
-        return true;
-    }
-
-    private boolean dimensionContainsPartId(JSONObject dimension, String partId) {
-        JSONArray partIds = dimension.optJSONArray("part_ids");
-        if (partIds == null) return false;
-        for (int i = 0; i < Math.min(partIds.length(), 12); i++) {
-            if (partId.equals(partIds.optString(i, ""))) return true;
-        }
-        return false;
     }
 
     private int updatePartsFromDimension(
@@ -3387,44 +7498,34 @@ public class MainActivity extends Activity {
     }
 
     private double recalculateDrawingSquareFeet(JSONArray parts) {
-        if (parts == null || parts.length() == 0) return 0;
-        double squareInches = 0;
-        for (int i = 0; i < Math.min(parts.length(), 40); i++) {
-            JSONObject part = parts.optJSONObject(i);
-            if (part == null) return 0;
-            double length = part.optDouble("length_inches", 0);
-            double width = part.optDouble("width_inches", 0);
-            double quantityValue = part.optDouble("quantity", 1);
-            if (!isFiniteDrawingNumber(length)
-                    || !isFiniteDrawingNumber(width)
-                    || !isFiniteDrawingNumber(quantityValue)
-                    || length <= 0
-                    || width <= 0
-                    || quantityValue <= 0) return 0;
-            double area = length * width * quantityValue;
-            squareInches += "subtract".equals(part.optString("operation")) ? -area : area;
-        }
-        if (!isFiniteDrawingNumber(squareInches) || squareInches <= 0) return 0;
-        return Math.round((squareInches / 144.0) * 100.0) / 100.0;
+        return DrawingMath.squareFeet(parts);
     }
 
     private String buildEditedDrawingExplanation(JSONArray parts, double squareFeet) {
         StringBuilder explanation = new StringBuilder("Edited measurements: ");
         int added = 0;
         int subtracted = 0;
+        int described = 0;
         for (int i = 0; i < Math.min(parts.length(), 40); i++) {
             JSONObject part = parts.optJSONObject(i);
             if (part == null) continue;
-            boolean subtract = "subtract".equals(part.optString("operation"));
-            String genericName = subtract
-                    ? "Opening " + (++subtracted)
-                    : "Piece " + (++added);
+            String feature = DrawingRules.featureType(part);
+            boolean ignoredCutout = DrawingRules.FEATURE_SINK.equals(feature)
+                    || DrawingRules.FEATURE_COOKTOP.equals(feature);
+            boolean subtract = DrawingRules.FEATURE_STOVE.equals(feature)
+                    || "subtract".equals(part.optString("operation"));
+            String genericName;
+            if (ignoredCutout) genericName = "Sink/cooktop cutout";
+            else if (DrawingRules.FEATURE_STOVE.equals(feature)) {
+                genericName = "Slide-in stove opening " + (++subtracted);
+            } else if (subtract) genericName = "Opening " + (++subtracted);
+            else genericName = "Piece " + (++added);
             double length = part.optDouble("length_inches", 0);
             double width = part.optDouble("width_inches", 0);
             double quantityValue = part.optDouble("quantity", 1);
             double area = length * width * quantityValue;
-            if (i > 0) explanation.append("; ");
-            explanation.append(subtract ? "subtract " : "")
+            if (described++ > 0) explanation.append("; ");
+            explanation.append(ignoredCutout ? "do not deduct " : subtract ? "subtract " : "")
                     .append(genericName)
                     .append(" ")
                     .append(measurementValue(length))
@@ -3443,24 +7544,81 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        IntentResult scan = IntentIntegrator.parseActivityResult(requestCode, resultCode, data);
-        if (scan != null) {
-            if (scan.getContents() != null) addSlab(scan.getContents());
+        if (requestCode == QR_SCAN_SLAB_REQUEST
+                || requestCode == QR_SCAN_DRAWING_ENROLLMENT_REQUEST) {
+            int completedPurpose = requestCode == QR_SCAN_DRAWING_ENROLLMENT_REQUEST
+                    ? QR_SCAN_DRAWING_ENROLLMENT
+                    : QR_SCAN_SLAB;
+            int expectedPurpose = pendingQrScanPurpose;
+            pendingQrScanPurpose = QR_SCAN_NONE;
+            IntentResult scan = IntentIntegrator.parseActivityResult(resultCode, data);
+            if (scan != null
+                    && scan.getContents() != null
+                    && (expectedPurpose == QR_SCAN_NONE || expectedPurpose == completedPurpose)) {
+                if (completedPurpose == QR_SCAN_DRAWING_ENROLLMENT) {
+                    saveDrawingEnrollment(scan.getContents());
+                } else {
+                    addSlab(scan.getContents());
+                }
+            }
             return;
         }
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == PICK_CUSTOMER_JOBS_FOLDER) {
+            if (resultCode == RESULT_OK && data != null && data.getData() != null) {
+                Uri treeUri = data.getData();
+                try {
+                    getContentResolver().takePersistableUriPermission(
+                            treeUri,
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                    | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+                    prefs.edit().putString(PREF_CUSTOMER_JOBS_TREE_URI, treeUri.toString()).apply();
+                    adminSessionExpiresAt = System.currentTimeMillis() + ADMIN_SESSION_MILLIS;
+                    showLiveEditScreen();
+                    Toast.makeText(this, "Shared customer folder connected.", Toast.LENGTH_LONG).show();
+                } catch (Exception exception) {
+                    Toast.makeText(this, "That folder could not be connected. Choose it again and allow access.", Toast.LENGTH_LONG).show();
+                }
+            }
+            return;
+        }
+        if (requestCode == PICK_ADMIN_PRODUCT_IMAGE) {
+            String imageKey = pendingProductImageKey;
+            pendingProductImageKey = null;
+            if (resultCode == RESULT_OK && data != null && data.getData() != null && imageKey != null) {
+                Uri imageUri = data.getData();
+                try {
+                    getContentResolver().takePersistableUriPermission(
+                            imageUri,
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    prefs.edit().putString(imageKey, imageUri.toString()).apply();
+                    adminSessionExpiresAt = System.currentTimeMillis() + ADMIN_SESSION_MILLIS;
+                    showLiveEditScreen();
+                    Toast.makeText(this, "Product picture updated.", Toast.LENGTH_SHORT).show();
+                } catch (Exception exception) {
+                    Toast.makeText(this, "That picture could not be saved.", Toast.LENGTH_LONG).show();
+                }
+            }
+            return;
+        }
         if (requestCode == PICK_IMAGE && resultCode == RESULT_OK && data != null && data.getData() != null) {
             selectedPhotoUri = data.getData();
             try {
-                int flags = data.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-                getContentResolver().takePersistableUriPermission(selectedPhotoUri, flags);
+                getContentResolver().takePersistableUriPermission(
+                        selectedPhotoUri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION);
             } catch (Exception ignored) {
             }
             addCountertopPhoto(selectedPhotoUri);
         }
         if (requestCode == TAKE_COUNTERTOP_PHOTO) {
-            if (resultCode == RESULT_OK && selectedPhotoUri != null) {
-                addCountertopPhoto(selectedPhotoUri);
+            pendingCameraCapture = 0;
+            Uri completedCountertopCapture = selectedPhotoUri;
+            if (resultCode == RESULT_OK
+                    && completedCountertopCapture != null
+                    && isReadableDrawingUri(completedCountertopCapture)) {
+                addCountertopPhoto(completedCountertopCapture);
+                completedCountertopCapture = null;
             } else if (resultCode == RESULT_OK && data != null && data.getExtras() != null
                     && data.getExtras().get("data") instanceof Bitmap) {
                 Uri photoUri = saveCameraBitmap(
@@ -3473,55 +7631,68 @@ public class MainActivity extends Activity {
                     Toast.makeText(this, "The countertop photo could not be saved.", Toast.LENGTH_LONG).show();
                 }
             }
-        }
-        if (requestCode == PICK_DRAWING_IMAGE && resultCode == RESULT_OK && data != null && data.getData() != null) {
-            cancelDrawingAnalysis();
-            clearAiDrawingResult();
-            drawingPhotoUri = data.getData();
-            try {
-                int flags = data.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-                getContentResolver().takePersistableUriPermission(drawingPhotoUri, flags);
-            } catch (Exception ignored) {
+            if (completedCountertopCapture != null
+                    && !countertopPhotoUris.contains(completedCountertopCapture)) {
+                if (completedCountertopCapture.equals(selectedPhotoUri)) {
+                    selectedPhotoUri = countertopPhotoUris.isEmpty()
+                            ? null
+                            : countertopPhotoUris.get(countertopPhotoUris.size() - 1);
+                }
+                releaseUnusedPhotoUri(completedCountertopCapture);
             }
-            drawingPhoto.setImageURI(drawingPhotoUri);
-            drawingStatus.setText("Drawing photo ready. Tap the AI button below.");
-            if (analyzeDrawingButton != null) analyzeDrawingButton.setEnabled(true);
-            photoAccordionOpen = 2;
-            showStep();
+        }
+        if (requestCode == PICK_DRAWING_IMAGE && resultCode == RESULT_OK && data != null) {
+            ArrayList<Uri> selectedDrawingUris = new ArrayList<>();
+            ClipData selectedDrawings = data.getClipData();
+            if (selectedDrawings != null) {
+                for (int i = 0; i < selectedDrawings.getItemCount(); i++) {
+                    Uri uri = selectedDrawings.getItemAt(i).getUri();
+                    if (uri != null && !selectedDrawingUris.contains(uri)) {
+                        selectedDrawingUris.add(uri);
+                    }
+                }
+            } else if (data.getData() != null) {
+                selectedDrawingUris.add(data.getData());
+            }
+            for (Uri uri : selectedDrawingUris) {
+                try {
+                    getContentResolver().takePersistableUriPermission(
+                            uri,
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                } catch (Exception ignored) {
+                }
+            }
+            if (!selectedDrawingUris.isEmpty()) offerDrawingCrop(selectedDrawingUris);
         }
         if (requestCode == TAKE_DRAWING_PHOTO) {
-            if (resultCode == RESULT_OK && drawingPhotoUri != null) {
-                cancelDrawingAnalysis();
-                clearAiDrawingResult();
-                drawingPhoto.setImageURI(drawingPhotoUri);
-                drawingStatus.setText("Drawing photo ready. Tap the AI button below.");
-                if (analyzeDrawingButton != null) analyzeDrawingButton.setEnabled(true);
-                photoAccordionOpen = 2;
-                showStep();
+            pendingCameraCapture = 0;
+            Uri completedDrawingCapture = pendingDrawingCaptureUri;
+            pendingDrawingCaptureUri = null;
+            if (resultCode == RESULT_OK
+                    && completedDrawingCapture != null
+                    && isReadableDrawingUri(completedDrawingCapture)) {
+                ArrayList<Uri> capturedDrawing = new ArrayList<>();
+                capturedDrawing.add(completedDrawingCapture);
+                offerDrawingCrop(capturedDrawing);
+                completedDrawingCapture = null;
             } else if (resultCode == RESULT_OK && data != null && data.getExtras() != null
                     && data.getExtras().get("data") instanceof Bitmap) {
-                cancelDrawingAnalysis();
-                clearAiDrawingResult();
-                drawingPhotoUri = saveCameraBitmap(
+                Uri savedDrawingUri = saveCameraBitmap(
                         (Bitmap) data.getExtras().get("data"),
                         "drawing_photos",
                         "countertop-drawing-");
-                if (drawingPhotoUri != null) {
-                    drawingPhoto.setImageURI(drawingPhotoUri);
-                    drawingStatus.setText("Drawing photo ready. Tap the AI button below.");
-                    if (analyzeDrawingButton != null) analyzeDrawingButton.setEnabled(true);
-                    photoAccordionOpen = 2;
-                    showStep();
+                if (savedDrawingUri != null) {
+                    ArrayList<Uri> capturedDrawing = new ArrayList<>();
+                    capturedDrawing.add(savedDrawingUri);
+                    offerDrawingCrop(capturedDrawing);
                 } else {
-                    drawingStatus.setText("The drawing photo could not be saved.");
-                    if (analyzeDrawingButton != null) analyzeDrawingButton.setEnabled(false);
+                    drawingStatus.setText(drawingPhotoUris.isEmpty()
+                            ? "The drawing photo could not be saved."
+                            : "The new photo could not be saved. Your existing drawings are still ready.");
                 }
-            } else {
-                cancelDrawingAnalysis();
-                clearAiDrawingResult();
-                drawingPhotoUri = null;
-                drawingStatus.setText("No countertop drawing selected.");
-                if (analyzeDrawingButton != null) analyzeDrawingButton.setEnabled(false);
+            }
+            if (completedDrawingCapture != null) {
+                releaseUnusedPhotoUri(completedDrawingCapture);
             }
         }
     }
@@ -3539,7 +7710,7 @@ public class MainActivity extends Activity {
 
     private Uri saveCameraBitmap(Bitmap bitmap, String folder, String prefix) {
         try {
-            File photoDirectory = new File(getCacheDir(), folder);
+            File photoDirectory = new File(getFilesDir(), folder);
             if (!photoDirectory.exists() && !photoDirectory.mkdirs()) return null;
             File photoFile = new File(photoDirectory, prefix + System.currentTimeMillis() + ".jpg");
             try (java.io.FileOutputStream output = new java.io.FileOutputStream(photoFile)) {
@@ -3554,7 +7725,39 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void releaseUnusedPhotoUri(Uri uri) {
+        if (uri == null
+                || drawingPhotoUris.contains(uri)
+                || countertopPhotoUris.contains(uri)
+                || uri.equals(selectedPhotoUri)
+                || uri.equals(pendingDrawingCaptureUri)) return;
+        try {
+            if ((getPackageName() + ".fileprovider").equals(uri.getAuthority())) {
+                // Delete only an app-owned camera copy. FileProvider restricts this call to
+                // the narrow cache/files paths declared in file_paths.xml.
+                getContentResolver().delete(uri, null, null);
+            } else {
+                // Never delete a gallery original. Release only this app's saved read grant.
+                getContentResolver().releasePersistableUriPermission(
+                        uri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            }
+        } catch (Exception ignored) {
+            // The provider may already have removed the file or may not expose a saved grant.
+        }
+    }
+
     private void sendQuoteEmail() {
+        if (!requireCompleteCustomerName("preparing the office quote email")) return;
+        if (!drawingRecords.isEmpty()
+                && !hasCompleteAiDrawingEstimate()
+                && manualCountertopSquareFeet() <= 0) {
+            Toast.makeText(
+                    this,
+                    "The drawing estimate is incomplete and cannot be used for a quote yet. Re-run AI, correct it in the redraw editor, or enter the countertop measurements manually.",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
         String to = officeEmail.getText().toString().trim();
         if (!to.isEmpty() && to.contains("@")) {
             prefs.edit().putString("office_email", to).apply();
@@ -3565,7 +7768,7 @@ public class MainActivity extends Activity {
         body.append("RAMSIER'S GRANITE AND QUARTZ\n");
         body.append("NEW COUNTERTOP QUOTE REQUEST\n\n");
         body.append("CUSTOMER\n");
-        body.append("Name: ").append(text(customerName)).append("\n");
+        body.append("Name: ").append(customerFullName()).append("\n");
         body.append("Phone: ").append(text(customerPhone)).append("\n");
         body.append("Email: ").append(text(customerEmail)).append("\n");
         body.append("Address: ").append(text(projectAddress)).append("\n\n");
@@ -3586,8 +7789,19 @@ public class MainActivity extends Activity {
                     .append(number.format(section.quantity)).append(" = ")
                     .append(number.format(section.squareFeet())).append(" sq ft\n");
         }
+        if (estimate.hasAiDrawings) {
+            body.append("Verified drawing square feet (opening rules already applied): ")
+                    .append(number.format(estimate.aiSquareFeet)).append("\n");
+        }
+        if (estimate.manualSquareFeet > 0) {
+            body.append("Additional manual square feet: ")
+                    .append(number.format(estimate.manualSquareFeet)).append("\n");
+        }
         body.append("Gross square feet: ").append(number.format(estimate.gross)).append("\n");
-        body.append("Stove opening subtracted: ").append(number.format(estimate.stove)).append(" sq ft\n");
+        if (!estimate.hasAiDrawings) {
+            body.append("Stove opening subtracted: ")
+                    .append(number.format(estimate.stove)).append(" sq ft\n");
+        }
         body.append("Net square feet: ").append(number.format(estimate.net)).append("\n");
         body.append("\nOPTIONS AND ACCESSORIES\n");
         body.append(optionsSummary()).append("\n");
@@ -3613,7 +7827,7 @@ public class MainActivity extends Activity {
         if (!to.isEmpty() && to.contains("@")) {
             email.putExtra(Intent.EXTRA_EMAIL, new String[]{to});
         }
-        email.putExtra(Intent.EXTRA_SUBJECT, "New countertop quote request - " + text(customerName));
+        email.putExtra(Intent.EXTRA_SUBJECT, "New countertop quote request - " + customerFullName());
         email.putExtra(Intent.EXTRA_TEXT, body.toString());
         if (!countertopPhotoUris.isEmpty()) {
             if (countertopPhotoUris.size() == 1) {
@@ -3641,21 +7855,45 @@ public class MainActivity extends Activity {
     private void confirmReset() {
         new AlertDialog.Builder(this)
                 .setTitle("Start a new customer?")
-                .setMessage("This clears the current customer, scanned slabs, measurements, and photo. The office email stays saved.")
+                .setMessage("This clears the current customer, scanned slabs, measurements, saved photos, and drawings. Gallery originals stay on your phone. The office email stays saved.")
                 .setPositiveButton("Clear", (dialog, which) -> resetQuote())
                 .setNegativeButton("Cancel", null)
                 .show();
     }
 
     private void resetQuote() {
+        currentJobId = "job_" + UUID.randomUUID().toString().replace("-", "");
+        currentDriveFolderName = "";
+        paymentLinkRequestInProgress = false;
+        paymentQuoteReference = "";
+        paymentQuoteAmountCents = -1;
+        preparedPaymentUrl = "";
+        preparedPaymentAmountCents = -1;
+        preparedPaymentImageUri = null;
+        preparedPaymentPdfUri = null;
+        templateAppointmentMillis = 0;
+        installationAppointmentMillis = 0;
         cancelDrawingAnalysis();
         clearAiDrawingResult();
+        dismissDrawingDialogs();
+        ArrayList<Uri> removedPhotoUris = new ArrayList<>(countertopPhotoUris);
+        for (Uri uri : drawingPhotoUris) {
+            if (!removedPhotoUris.contains(uri)) removedPhotoUris.add(uri);
+        }
         slabs.clear();
         sections.clear();
         selectedPhotoUri = null;
         countertopPhotoUris.clear();
-        drawingPhotoUri = null;
-        customerName.setText("");
+        drawingPhotoUris.clear();
+        drawingRecords.clear();
+        pendingDrawingCaptureUri = null;
+        displayedDrawingPreviewUri = null;
+        activeDrawingIndex = 0;
+        drawingInputRevision++;
+        pendingCameraCapture = 0;
+        for (Uri uri : removedPhotoUris) releaseUnusedPhotoUri(uri);
+        customerFirstName.setText("");
+        customerLastName.setText("");
         customerPhone.setText("");
         customerEmail.setText("");
         projectAddress.setText("");
@@ -3681,10 +7919,26 @@ public class MainActivity extends Activity {
         cabinetInQuantity.setText("0");
         cabinetsApproximateDate.setText("");
         cabinetInterestComments.setText("");
+        additionalSquareFeet.setText("0");
+        finalPricePerSqFt.setText("");
+        removalSquareFeet.setText("0");
+        templateDateTime.setText("");
+        installationDateTime.setText("");
+        checkNumber.setText("");
+        paymentNotes.setText("");
+        jobSearchInput.setText("");
         cooktopCutoutYes = false;
         basketsYes = false;
         gridsYes = false;
         wantsToBuyCabinets = false;
+        countertopRemoval = false;
+        plumbingNoticeAcknowledged = false;
+        creditCardPolicyAcknowledged = false;
+        jobFinished = false;
+        customerSigned = false;
+        paymentMethod = "ACH bank account";
+        paymentStatus = "Not requested";
+        signaturePad.clear();
         edgeDetail = "Eased and polished";
         sinkSelection = "Not selected";
         equalDoubleSinkQuantity.setText("0");
@@ -3707,6 +7961,7 @@ public class MainActivity extends Activity {
         totalResult.setText("Estimated total: $0.00");
         stepIndex = 0;
         saveLists();
+        persistDrawingState();
         showStep();
         Toast.makeText(this, "Ready for a new customer.", Toast.LENGTH_SHORT).show();
     }
@@ -3750,7 +8005,9 @@ public class MainActivity extends Activity {
     }
 
     private String cleanMsiSearch(String value) {
-        return value.replace("MSI:", "").replace("...", "").trim();
+        return value == null
+                ? ""
+                : value.replace("MSI:", "").replace("...", "").trim();
     }
 
     private String pageTitle(int pageId) {
@@ -3776,6 +8033,30 @@ public class MainActivity extends Activity {
             case PAGE_WATERFALL: return "Waterfall";
             case PAGE_CABINETS: return "Cabinet status";
             case PAGE_BUY_CABINETS: return "Buy cabinets";
+            case PAGE_JOB_SEARCH: return "Job search";
+            case PAGE_MANUAL_MEASUREMENT: return "Manual measurement";
+            case PAGE_COUNTERTOP_PHOTOS: return "Countertop photos";
+            case PAGE_COUNTERTOP_REMOVAL: return "Countertop removal";
+            case PAGE_REVIEW_QUOTE: return "Review quote request";
+            case PAGE_PRINT_QUOTE: return "Print or save PDF";
+            case PAGE_TEMPLATE_UPDATE: return "Template update";
+            case PAGE_FINAL_QUOTE: return "Final quote";
+            case PAGE_CUSTOMER_SIGNATURE: return "Customer signature";
+            case PAGE_SIGNED_QUOTE: return "Signed quote copy";
+            case PAGE_TEMPLATE_CALENDAR: return "TP calendar appointment";
+            case PAGE_INSTALL_CALENDAR: return "IN calendar appointment";
+            case PAGE_INSTALLATION_JOB: return "Installation job";
+            case PAGE_JOB_FINISHED: return "Job finished checklist";
+            case PAGE_CREDIT_POLICY: return "Credit card policy";
+            case PAGE_PAYMENT_METHOD: return "Payment method";
+            case PAGE_STRIPE_ACH: return "Stripe ACH";
+            case PAGE_CHASE_CHECK: return "Chase check";
+            case PAGE_CHASE_CREDIT: return "Chase credit entry";
+            case PAGE_PAYMENT_STATUS: return "Payment status";
+            case PAGE_SCHEDULE: return "Schedule";
+            case PAGE_PLUMBING_NOTICE: return "No plumbing notice";
+            case PAGE_CROP_DRAWING: return "Crop drawing";
+            case PAGE_JOB_HISTORY: return "Job history";
             case PAGE_SECTION_NAME: return "Countertop section name";
             case PAGE_SECTION_LENGTH: return "Section length";
             case PAGE_SECTION_WIDTH: return "Section width";
@@ -3822,7 +8103,7 @@ public class MainActivity extends Activity {
             case PAGE_BASKETS: return questionText(pageId, "Would you like basket drains?");
             case PAGE_GRIDS: return questionText(pageId, "Would you like big grids?");
             case PAGE_WATERFALL: return questionText(pageId, "Do you want a waterfall?");
-            case PAGE_CABINETS: return questionText(pageId, "How many cabinet areas are in?");
+            case PAGE_CABINETS: return questionText(pageId, "Are the cabinets in?");
             case PAGE_BUY_CABINETS: return questionText(pageId, "Any cabinet comments?");
             case PAGE_SECTION_NAME: return questionText(pageId, "What should this countertop section be called?");
             case PAGE_SECTION_LENGTH: return questionText(pageId, "What is the section length in inches?");
@@ -3904,6 +8185,8 @@ public class MainActivity extends Activity {
         applyV127PageChangesOnce();
         applyV130PageChangesOnce();
         applyV138PageChangesOnce();
+        applyV155ApprovedPageOrderOnce();
+        applyV156RequestedPageChangesOnce();
     }
 
     private void addNewPricingPagesOnce() {
@@ -3993,6 +8276,20 @@ public class MainActivity extends Activity {
         prefs.edit().putBoolean("v1_38_page_changes_applied", true).apply();
     }
 
+    private void applyV155ApprovedPageOrderOnce() {
+        if (prefs.getBoolean("v1_55_approved_page_order_applied", false)) return;
+        loadDefaultPageOrder();
+        savePageOrder();
+        prefs.edit().putBoolean("v1_55_approved_page_order_applied", true).apply();
+    }
+
+    private void applyV156RequestedPageChangesOnce() {
+        if (prefs.getBoolean("v1_56_requested_page_changes_applied", false)) return;
+        loadDefaultPageOrder();
+        savePageOrder();
+        prefs.edit().putBoolean("v1_56_requested_page_changes_applied", true).apply();
+    }
+
     private void movePageBefore(int pageId, int beforePageId) {
         pageOrder.remove(Integer.valueOf(pageId));
         int beforeIndex = pageOrder.indexOf(beforePageId);
@@ -4061,27 +8358,7 @@ public class MainActivity extends Activity {
     }
 
     private boolean isValidBuiltInPageId(int pageId) {
-        return pageId == PAGE_NAME
-                || pageId == PAGE_PHONE
-                || pageId == PAGE_EMAIL
-                || pageId == PAGE_ADDRESS
-                || pageId == PAGE_NOTES
-                || pageId == PAGE_OFFICE_EMAIL
-                || pageId == PAGE_SLABS
-                || pageId == PAGE_PRICE
-                || pageId == PAGE_SINK_CHARGE
-                || pageId == PAGE_EDGE_CHARGE
-                || pageId == PAGE_TEAR_OUT
-                || pageId == PAGE_OTHER_CHARGE
-                || pageId == PAGE_PHOTO
-                || pageId == PAGE_COOKTOP_CUTOUT
-                || pageId == PAGE_EDGE_DETAIL
-                || pageId == PAGE_FAUCET
-                || pageId == PAGE_BASKETS
-                || pageId == PAGE_GRIDS
-                || pageId == PAGE_WATERFALL
-                || pageId == PAGE_CABINETS
-                || pageId == PAGE_BUY_CABINETS
+        return (pageId >= PAGE_NAME && pageId <= PAGE_JOB_HISTORY)
                 || pageId == PAGE_SECTION_NAME
                 || pageId == PAGE_SECTION_LENGTH
                 || pageId == PAGE_SECTION_WIDTH
@@ -4198,6 +8475,21 @@ public class MainActivity extends Activity {
 
     private boolean isBlank(EditText field) {
         return field.getText().toString().trim().isEmpty();
+    }
+
+    private boolean hasCompleteCustomerName() {
+        return CustomerNamePolicy.hasCompleteName(
+                customerFirstName.getText().toString(),
+                customerLastName.getText().toString());
+    }
+
+    private boolean requireCompleteCustomerName(String action) {
+        if (hasCompleteCustomerName()) return true;
+        Toast.makeText(
+                this,
+                "Enter the customer's first and last name before " + action + ".",
+                Toast.LENGTH_LONG).show();
+        return false;
     }
 
     private String textOrNotProvided(EditText editText) {
@@ -4468,6 +8760,584 @@ public class MainActivity extends Activity {
         return Math.round(value * getResources().getDisplayMetrics().density);
     }
 
+    private interface DrawingCropCallback {
+        void finished(Uri resultUri);
+    }
+
+    private void openCalendarInsert(String title, int color, long startMillis) {
+        if (!requireCompleteCustomerName("adding a customer calendar appointment")) return;
+        if (startMillis <= 0) {
+            Toast.makeText(this, "Choose the appointment date and time first.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        Intent calendar = new Intent(Intent.ACTION_INSERT, CalendarContract.Events.CONTENT_URI);
+        calendar.putExtra(CalendarContract.Events.TITLE, title);
+        calendar.putExtra(CalendarContract.Events.EVENT_LOCATION, text(projectAddress));
+        calendar.putExtra(CalendarContract.Events.DESCRIPTION,
+                "Ramsier's Granite & Quartz — " + customerFullName());
+        calendar.putExtra(CalendarContract.Events.EVENT_COLOR, color);
+        calendar.putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, startMillis);
+        calendar.putExtra(CalendarContract.EXTRA_EVENT_END_TIME, startMillis + 60 * 60 * 1000L);
+        try {
+            startActivity(Intent.createChooser(calendar, "Review and save calendar appointment"));
+        } catch (Exception exception) {
+            Toast.makeText(this, "A calendar app could not be opened.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private boolean hasCustomerJobsFolder() {
+        return !prefs.getString(PREF_CUSTOMER_JOBS_TREE_URI, "").trim().isEmpty();
+    }
+
+    private Uri customerJobsTreeUri() {
+        String saved = prefs.getString(PREF_CUSTOMER_JOBS_TREE_URI, "").trim();
+        return saved.isEmpty() ? null : Uri.parse(saved);
+    }
+
+    private String connectedCustomerJobsFolderMessage() {
+        Uri treeUri = customerJobsTreeUri();
+        if (treeUri == null) {
+            return "Shared Drive is not connected on this phone. An owner uses Admin settings once to choose the private Ramsiers Customer Jobs folder.";
+        }
+        try {
+            return "Connected to: " + DriveJobStore.rootName(this, treeUri)
+                    + ". Only Google accounts the owner shares that folder with can see these jobs.";
+        } catch (Exception ignored) {
+            return "A shared folder was selected, but it may need to be connected again.";
+        }
+    }
+
+    private void openCustomerJobsFolderPicker() {
+        if (!requireActiveAdminSession()) return;
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+                | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
+        startActivityForResult(intent, PICK_CUSTOMER_JOBS_FOLDER);
+    }
+
+    private void saveCurrentJobToDrive() {
+        if (driveOperationInProgress) {
+            Toast.makeText(this, "Drive is already working. Please wait.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Uri treeUri = customerJobsTreeUri();
+        if (treeUri == null) {
+            Toast.makeText(this, "Ask the owner to connect the shared folder in Admin settings first.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (isBlank(customerFirstName) || isBlank(customerLastName)) {
+            Toast.makeText(this, "Enter the customer's first and last name before saving to Drive.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        final JSONObject job;
+        try {
+            job = buildDriveJobJson();
+        } catch (Exception exception) {
+            Toast.makeText(this, "The current job could not be prepared for Drive.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (currentDriveFolderName.isEmpty()) currentDriveFolderName = customerDriveFolderName();
+        String folderName = currentDriveFolderName;
+        ArrayList<Uri> drawings = new ArrayList<>(drawingPhotoUris);
+        ArrayList<Uri> photos = new ArrayList<>(countertopPhotoUris);
+        Uri signedQuote = preparedPaymentPdfUri;
+        driveOperationInProgress = true;
+        Toast.makeText(this, "Saving the customer folder to Drive…", Toast.LENGTH_LONG).show();
+        new Thread(() -> {
+            try {
+                DriveJobStore.save(
+                        getApplicationContext(), treeUri, folderName, job, drawings, photos, signedQuote);
+                runOnUiThread(() -> {
+                    driveOperationInProgress = false;
+                    saveJobSnapshot();
+                    Toast.makeText(this, "Customer folder saved to shared Drive.", Toast.LENGTH_LONG).show();
+                });
+            } catch (Exception exception) {
+                runOnUiThread(() -> {
+                    driveOperationInProgress = false;
+                    Toast.makeText(this, safeDriveError(exception), Toast.LENGTH_LONG).show();
+                });
+            }
+        }, "customer-drive-save").start();
+    }
+
+    private void showDriveJobSearchResults(String query) {
+        if (driveOperationInProgress) {
+            Toast.makeText(this, "Drive is already working. Please wait.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Uri treeUri = customerJobsTreeUri();
+        if (treeUri == null) {
+            Toast.makeText(this, "Ask the owner to connect the shared folder in Admin settings first.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        driveOperationInProgress = true;
+        Toast.makeText(this, "Checking shared customer jobs…", Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            try {
+                ArrayList<DriveJobStore.JobEntry> entries = DriveJobStore.list(
+                        getApplicationContext(), treeUri, query);
+                runOnUiThread(() -> showDriveJobChoices(entries));
+            } catch (Exception exception) {
+                runOnUiThread(() -> {
+                    driveOperationInProgress = false;
+                    Toast.makeText(this, safeDriveError(exception), Toast.LENGTH_LONG).show();
+                });
+            }
+        }, "customer-drive-list").start();
+    }
+
+    private void showDriveJobChoices(ArrayList<DriveJobStore.JobEntry> entries) {
+        driveOperationInProgress = false;
+        if (entries.isEmpty()) {
+            new AlertDialog.Builder(this)
+                    .setTitle("Shared Drive jobs")
+                    .setMessage("No shared jobs match that search.")
+                    .setPositiveButton("Close", null)
+                    .show();
+            return;
+        }
+        String[] labels = new String[entries.size()];
+        for (int i = 0; i < entries.size(); i++) {
+            JSONObject job = entries.get(i).data;
+            labels[i] = job.optString("name", "Customer")
+                    + "\n" + job.optString("address", "")
+                    + "\n" + job.optString("status", "Not requested")
+                    + " — " + job.optString("total", "$0.00");
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("Tap a job to open it")
+                .setItems(labels, (dialog, which) -> restoreDriveJob(entries.get(which)))
+                .setNegativeButton("Close", null)
+                .show();
+    }
+
+    private String safeDriveError(Exception exception) {
+        String message = exception.getMessage();
+        if (message == null || message.trim().isEmpty()) message = "Google Drive could not be reached.";
+        return message + " No on-phone job was deleted.";
+    }
+
+    private String customerDriveFolderName() {
+        String last = customerLastName.getText().toString().trim();
+        String first = customerFirstName.getText().toString().trim();
+        String address = projectAddress.getText().toString().trim();
+        String street = address.isEmpty() ? "No address" : address.split(",")[0].trim();
+        String suffix = currentJobId.length() > 8
+                ? currentJobId.substring(currentJobId.length() - 8)
+                : currentJobId;
+        return safeDriveName(last + ", " + first + " - " + street + " - " + suffix);
+    }
+
+    private String safeDriveName(String value) {
+        String safe = value.replaceAll("[\\\\/:*?\"<>|]", "-").replaceAll("\\s+", " ").trim();
+        return safe.length() > 100 ? safe.substring(0, 100).trim() : safe;
+    }
+
+    private JSONObject buildDriveJobJson() throws Exception {
+        syncActiveDrawingRecord();
+        Estimate estimate = calculateAndDisplay(false);
+        JSONObject job = new JSONObject();
+        job.put("schema", 1);
+        job.put("id", currentJobId);
+        job.put("name", customerFullName());
+        job.put("address", projectAddress.getText().toString().trim());
+        job.put("status", paymentStatus);
+        job.put("total", money(estimate.total));
+        job.put("driveFolderName", currentDriveFolderName);
+
+        JSONObject inputs = new JSONObject();
+        putDriveText(inputs, "firstName", customerFirstName);
+        putDriveText(inputs, "lastName", customerLastName);
+        putDriveText(inputs, "phone", customerPhone);
+        putDriveText(inputs, "email", customerEmail);
+        putDriveText(inputs, "address", projectAddress);
+        putDriveText(inputs, "notes", projectNotes);
+        putDriveText(inputs, "stoveLength", stoveLength);
+        putDriveText(inputs, "stoveWidth", stoveWidth);
+        putDriveText(inputs, "pricePerSqFt", pricePerSqFt);
+        putDriveText(inputs, "sinkCharge", sinkCharge);
+        putDriveText(inputs, "edgeCharge", edgeCharge);
+        putDriveText(inputs, "tearOutCharge", tearOutCharge);
+        putDriveText(inputs, "otherCharge", otherCharge);
+        putDriveText(inputs, "cooktopCutoutQuantity", cooktopCutoutQuantity);
+        putDriveText(inputs, "edgeLinearFeet", edgeLinearFeet);
+        putDriveText(inputs, "faucetQuantity", faucetQuantity);
+        putDriveText(inputs, "cabinetInQuantity", cabinetInQuantity);
+        putDriveText(inputs, "equalDoubleSinkQuantity", equalDoubleSinkQuantity);
+        putDriveText(inputs, "offsetDoubleSinkQuantity", offsetDoubleSinkQuantity);
+        putDriveText(inputs, "singleBowlSinkQuantity", singleBowlSinkQuantity);
+        putDriveText(inputs, "whiteRectangleVanitySinkQuantity", whiteRectangleVanitySinkQuantity);
+        putDriveText(inputs, "biscuitRectangleVanitySinkQuantity", biscuitRectangleVanitySinkQuantity);
+        putDriveText(inputs, "rectangleVanitySinkLocations", rectangleVanitySinkLocations);
+        putDriveText(inputs, "whiteOvalVanitySinkQuantity", whiteOvalVanitySinkQuantity);
+        putDriveText(inputs, "biscuitOvalVanitySinkQuantity", biscuitOvalVanitySinkQuantity);
+        putDriveText(inputs, "ovalVanitySinkLocations", ovalVanitySinkLocations);
+        putDriveText(inputs, "anotherSinkQuantity", anotherSinkQuantity);
+        putDriveText(inputs, "undecidedSinkQuantity", undecidedSinkQuantity);
+        putDriveText(inputs, "basketQuantity", basketQuantity);
+        putDriveText(inputs, "gridQuantity", gridQuantity);
+        putDriveText(inputs, "waterfallQuantity", waterfallQuantity);
+        putDriveText(inputs, "waterfallComments", waterfallComments);
+        putDriveText(inputs, "cabinetsApproximateDate", cabinetsApproximateDate);
+        putDriveText(inputs, "cabinetInterestComments", cabinetInterestComments);
+        putDriveText(inputs, "additionalSquareFeet", additionalSquareFeet);
+        putDriveText(inputs, "finalPricePerSqFt", finalPricePerSqFt);
+        putDriveText(inputs, "removalSquareFeet", removalSquareFeet);
+        putDriveText(inputs, "templateDateTime", templateDateTime);
+        putDriveText(inputs, "installationDateTime", installationDateTime);
+        job.put("inputs", inputs);
+
+        JSONObject choices = new JSONObject();
+        choices.put("cooktopCutoutYes", cooktopCutoutYes);
+        choices.put("basketsYes", basketsYes);
+        choices.put("gridsYes", gridsYes);
+        choices.put("wantsToBuyCabinets", wantsToBuyCabinets);
+        choices.put("countertopRemoval", countertopRemoval);
+        choices.put("plumbingNoticeAcknowledged", plumbingNoticeAcknowledged);
+        choices.put("creditCardPolicyAcknowledged", creditCardPolicyAcknowledged);
+        choices.put("jobFinished", jobFinished);
+        choices.put("customerSigned", customerSigned);
+        choices.put("paymentMethod", paymentMethod);
+        choices.put("paymentStatus", paymentStatus);
+        choices.put("edgeDetail", edgeDetail);
+        choices.put("sinkSelection", sinkSelection);
+        choices.put("templateAppointmentMillis", templateAppointmentMillis);
+        choices.put("installationAppointmentMillis", installationAppointmentMillis);
+        job.put("choices", choices);
+
+        JSONArray savedSlabs = new JSONArray();
+        for (SlabSelection slab : slabs) {
+            savedSlabs.put(new JSONObject().put("name", slab.name).put("raw", slab.raw));
+        }
+        job.put("slabs", savedSlabs);
+        JSONArray savedSections = new JSONArray();
+        for (CounterSection section : sections) {
+            savedSections.put(new JSONObject()
+                    .put("name", section.name)
+                    .put("length", section.length)
+                    .put("width", section.width)
+                    .put("quantity", section.quantity));
+        }
+        job.put("sections", savedSections);
+
+        JSONArray savedDrawings = new JSONArray();
+        for (DrawingRecord drawing : drawingRecords) {
+            JSONObject saved = new JSONObject();
+            saved.put("resultRevision", drawing.resultRevision);
+            saved.put("analyzed", drawing.analyzed);
+            saved.put("squareFeet", drawing.squareFeet);
+            saved.put("canCalculate", drawing.canCalculate);
+            saved.put("editedByUser", drawing.editedByUser);
+            saved.put("confidence", drawing.confidence);
+            saved.put("explanation", drawing.explanation);
+            saved.put("missingInformation", drawing.missingInformation);
+            saved.put("lastError", drawing.lastError);
+            if (drawing.calculationParts != null) saved.put("calculationParts", drawing.calculationParts);
+            if (drawing.verificationDrawing != null) saved.put("verificationDrawing", drawing.verificationDrawing);
+            savedDrawings.put(saved);
+        }
+        job.put("drawings", savedDrawings);
+
+        JSONObject customAnswers = new JSONObject();
+        for (Integer id : customInputs.keySet()) {
+            EditText input = customInputs.get(id);
+            if (input != null) customAnswers.put(String.valueOf(id), input.getText().toString());
+        }
+        job.put("customAnswers", customAnswers);
+        return job;
+    }
+
+    private void putDriveText(JSONObject object, String key, EditText input) throws Exception {
+        object.put(key, input.getText().toString());
+    }
+
+    private void restoreDriveJob(DriveJobStore.JobEntry entry) {
+        try {
+            JSONObject job = entry.data;
+            JSONObject inputs = job.optJSONObject("inputs");
+            if (inputs == null) throw new IllegalStateException("This job backup is incomplete.");
+            currentJobId = job.optString("id", "job_" + UUID.randomUUID().toString().replace("-", ""));
+            currentDriveFolderName = entry.folderName;
+            restoreDriveText(inputs, "firstName", customerFirstName);
+            restoreDriveText(inputs, "lastName", customerLastName);
+            restoreDriveText(inputs, "phone", customerPhone);
+            restoreDriveText(inputs, "email", customerEmail);
+            restoreDriveText(inputs, "address", projectAddress);
+            restoreDriveText(inputs, "notes", projectNotes);
+            restoreDriveText(inputs, "stoveLength", stoveLength);
+            restoreDriveText(inputs, "stoveWidth", stoveWidth);
+            restoreDriveText(inputs, "pricePerSqFt", pricePerSqFt);
+            restoreDriveText(inputs, "sinkCharge", sinkCharge);
+            restoreDriveText(inputs, "edgeCharge", edgeCharge);
+            restoreDriveText(inputs, "tearOutCharge", tearOutCharge);
+            restoreDriveText(inputs, "otherCharge", otherCharge);
+            restoreDriveText(inputs, "cooktopCutoutQuantity", cooktopCutoutQuantity);
+            restoreDriveText(inputs, "edgeLinearFeet", edgeLinearFeet);
+            restoreDriveText(inputs, "faucetQuantity", faucetQuantity);
+            restoreDriveText(inputs, "cabinetInQuantity", cabinetInQuantity);
+            restoreDriveText(inputs, "equalDoubleSinkQuantity", equalDoubleSinkQuantity);
+            restoreDriveText(inputs, "offsetDoubleSinkQuantity", offsetDoubleSinkQuantity);
+            restoreDriveText(inputs, "singleBowlSinkQuantity", singleBowlSinkQuantity);
+            restoreDriveText(inputs, "whiteRectangleVanitySinkQuantity", whiteRectangleVanitySinkQuantity);
+            restoreDriveText(inputs, "biscuitRectangleVanitySinkQuantity", biscuitRectangleVanitySinkQuantity);
+            restoreDriveText(inputs, "rectangleVanitySinkLocations", rectangleVanitySinkLocations);
+            restoreDriveText(inputs, "whiteOvalVanitySinkQuantity", whiteOvalVanitySinkQuantity);
+            restoreDriveText(inputs, "biscuitOvalVanitySinkQuantity", biscuitOvalVanitySinkQuantity);
+            restoreDriveText(inputs, "ovalVanitySinkLocations", ovalVanitySinkLocations);
+            restoreDriveText(inputs, "anotherSinkQuantity", anotherSinkQuantity);
+            restoreDriveText(inputs, "undecidedSinkQuantity", undecidedSinkQuantity);
+            restoreDriveText(inputs, "basketQuantity", basketQuantity);
+            restoreDriveText(inputs, "gridQuantity", gridQuantity);
+            restoreDriveText(inputs, "waterfallQuantity", waterfallQuantity);
+            restoreDriveText(inputs, "waterfallComments", waterfallComments);
+            restoreDriveText(inputs, "cabinetsApproximateDate", cabinetsApproximateDate);
+            restoreDriveText(inputs, "cabinetInterestComments", cabinetInterestComments);
+            restoreDriveText(inputs, "additionalSquareFeet", additionalSquareFeet);
+            restoreDriveText(inputs, "finalPricePerSqFt", finalPricePerSqFt);
+            restoreDriveText(inputs, "removalSquareFeet", removalSquareFeet);
+            restoreDriveText(inputs, "templateDateTime", templateDateTime);
+            restoreDriveText(inputs, "installationDateTime", installationDateTime);
+
+            JSONObject choices = job.optJSONObject("choices");
+            if (choices == null) choices = new JSONObject();
+            cooktopCutoutYes = choices.optBoolean("cooktopCutoutYes");
+            basketsYes = choices.optBoolean("basketsYes");
+            gridsYes = choices.optBoolean("gridsYes");
+            wantsToBuyCabinets = choices.optBoolean("wantsToBuyCabinets");
+            countertopRemoval = choices.optBoolean("countertopRemoval");
+            plumbingNoticeAcknowledged = choices.optBoolean("plumbingNoticeAcknowledged");
+            creditCardPolicyAcknowledged = choices.optBoolean("creditCardPolicyAcknowledged");
+            jobFinished = choices.optBoolean("jobFinished");
+            customerSigned = choices.optBoolean("customerSigned");
+            paymentMethod = choices.optString("paymentMethod", "ACH bank account");
+            paymentStatus = choices.optString("paymentStatus", "Not requested");
+            edgeDetail = choices.optString("edgeDetail", "Eased and polished");
+            sinkSelection = choices.optString("sinkSelection", "Not selected");
+            templateAppointmentMillis = choices.optLong("templateAppointmentMillis", 0);
+            installationAppointmentMillis = choices.optLong("installationAppointmentMillis", 0);
+
+            slabs.clear();
+            JSONArray savedSlabs = job.optJSONArray("slabs");
+            if (savedSlabs != null) for (int i = 0; i < savedSlabs.length(); i++) {
+                JSONObject slab = savedSlabs.optJSONObject(i);
+                if (slab != null) slabs.add(new SlabSelection(slab.optString("name"), slab.optString("raw")));
+            }
+            sections.clear();
+            JSONArray savedSections = job.optJSONArray("sections");
+            if (savedSections != null) for (int i = 0; i < savedSections.length(); i++) {
+                JSONObject section = savedSections.optJSONObject(i);
+                if (section != null) sections.add(new CounterSection(
+                        section.optString("name"),
+                        section.optDouble("length"),
+                        section.optDouble("width"),
+                        section.optDouble("quantity", 1)));
+            }
+
+            countertopPhotoUris.clear();
+            countertopPhotoUris.addAll(entry.countertopPhotoUris);
+            selectedPhotoUri = countertopPhotoUris.isEmpty() ? null : countertopPhotoUris.get(0);
+            drawingPhotoUris.clear();
+            drawingPhotoUris.addAll(entry.drawingUris);
+            drawingRecords.clear();
+            JSONArray savedDrawings = job.optJSONArray("drawings");
+            for (int i = 0; i < drawingPhotoUris.size(); i++) {
+                JSONObject drawing = savedDrawings == null ? null : savedDrawings.optJSONObject(i);
+                if (drawing == null) {
+                    drawingRecords.add(DrawingRecord.empty(drawingPhotoUris.get(i).toString()));
+                } else {
+                    drawingRecords.add(DrawingRecord.fromSavedJob(
+                            drawingPhotoUris.get(i).toString(),
+                            drawing));
+                }
+            }
+            activeDrawingIndex = 0;
+            loadActiveDrawingResult(false);
+            preparedPaymentPdfUri = entry.signedQuoteUri;
+            preparedPaymentImageUri = null;
+            preparedPaymentUrl = "";
+            preparedPaymentAmountCents = -1;
+            checkNumber.setText("");
+            paymentNotes.setText("");
+            signaturePad.clear();
+
+            JSONObject customAnswers = job.optJSONObject("customAnswers");
+            if (customAnswers != null) for (Integer id : customInputs.keySet()) {
+                EditText input = customInputs.get(id);
+                if (input != null) input.setText(customAnswers.optString(String.valueOf(id), ""));
+            }
+            saveLists();
+            persistDrawingState();
+            saveJobSnapshot();
+            int nameStep = pageOrder.indexOf(PAGE_NAME);
+            stepIndex = nameStep < 0 ? 0 : nameStep;
+            showStep();
+            Toast.makeText(this, "Shared job opened. Review it before making changes.", Toast.LENGTH_LONG).show();
+        } catch (Exception exception) {
+            Toast.makeText(this, safeDriveError(exception), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void restoreDriveText(JSONObject object, String key, EditText input) {
+        input.setText(object.optString(key, ""));
+    }
+
+    private void showJobSearchResults(String query) {
+        String needle = query == null ? "" : query.trim().toLowerCase(Locale.US);
+        ArrayList<String> matches = new ArrayList<>();
+        try {
+            JSONArray jobs = new JSONArray(prefs.getString("job_history_v1", "[]"));
+            for (int i = jobs.length() - 1; i >= 0; i--) {
+                JSONObject job = jobs.getJSONObject(i);
+                if (!needle.isEmpty() && !job.toString().toLowerCase(Locale.US).contains(needle)) continue;
+                matches.add(job.optString("name", "Customer")
+                        + "\n" + job.optString("address", "")
+                        + "\n" + job.optString("status", "Not requested")
+                        + " — " + job.optString("total", "$0.00"));
+            }
+        } catch (Exception ignored) {
+        }
+        String message = matches.isEmpty()
+                ? "No saved jobs match that search."
+                : android.text.TextUtils.join("\n\n", matches);
+        new AlertDialog.Builder(this)
+                .setTitle(needle.isEmpty() ? "Saved jobs" : "Search results")
+                .setMessage(message)
+                .setPositiveButton("Close", null)
+                .show();
+    }
+
+    private void saveJobSnapshot() {
+        if (isBlank(customerFirstName) || isBlank(customerLastName)) return;
+        try {
+            JSONArray jobs = new JSONArray(prefs.getString("job_history_v1", "[]"));
+            JSONObject job = new JSONObject();
+            String id = currentJobId;
+            job.put("id", id);
+            job.put("firstName", customerFirstName.getText().toString().trim());
+            job.put("lastName", customerLastName.getText().toString().trim());
+            job.put("name", customerFullName());
+            job.put("phone", customerPhone.getText().toString().trim());
+            job.put("email", customerEmail.getText().toString().trim());
+            job.put("address", projectAddress.getText().toString().trim());
+            job.put("notes", projectNotes.getText().toString().trim());
+            job.put("slabs", printableSelectedSlabs());
+            job.put("status", paymentStatus);
+            job.put("paymentMethod", paymentMethod);
+            job.put("checkNumber", checkNumber.getText().toString().trim());
+            job.put("paymentNotes", paymentNotes.getText().toString().trim());
+            job.put("total", money(calculateAndDisplay(false).total));
+            job.put("template", templateDateTime.getText().toString().trim());
+            job.put("installation", installationDateTime.getText().toString().trim());
+            job.put("driveFolderName", currentDriveFolderName);
+            int existing = -1;
+            for (int i = 0; i < jobs.length(); i++) {
+                if (id.equals(jobs.getJSONObject(i).optString("id"))) {
+                    existing = i;
+                    break;
+                }
+            }
+            if (existing >= 0) jobs.put(existing, job); else jobs.put(job);
+            prefs.edit().putString("job_history_v1", jobs.toString()).apply();
+        } catch (Exception ignored) {
+        }
+    }
+
+    private double effectivePricePerSquareFoot() {
+        return JobWorkflow.effectivePrice(value(pricePerSqFt), value(finalPricePerSqFt));
+    }
+
+    private double removalCharge() {
+        return JobWorkflow.removalCharge(countertopRemoval, value(removalSquareFeet));
+    }
+
+    private String customerFullName() {
+        String first = customerFirstName.getText().toString().trim();
+        String last = customerLastName.getText().toString().trim();
+        String full = (first + " " + last).trim();
+        return full.isEmpty() ? "Not provided" : full;
+    }
+
+    private String calendarJobName() {
+        String first = customerFirstName.getText().toString().trim();
+        String last = customerLastName.getText().toString().trim();
+        String initial = first.isEmpty() ? "" : first.substring(0, 1).toUpperCase(Locale.US) + " ";
+        String result = (initial + last).trim();
+        return result.isEmpty() ? "Customer" : result;
+    }
+
+    private static class DrawingCropPreviewView extends View {
+        private Bitmap source;
+        private final Paint imagePaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+        private final Paint shadePaint = new Paint();
+        private final Paint borderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final int[] trimPercent = new int[4];
+
+        DrawingCropPreviewView(Context context, Bitmap source) {
+            super(context);
+            this.source = source;
+            shadePaint.setColor(0x99000000);
+            borderPaint.setColor(Color.WHITE);
+            borderPaint.setStyle(Paint.Style.STROKE);
+            borderPaint.setStrokeWidth(5f);
+            setBackgroundColor(Color.BLACK);
+        }
+
+        void setSource(Bitmap source) {
+            if (source == null || source.isRecycled()) return;
+            this.source = source;
+            for (int i = 0; i < trimPercent.length; i++) trimPercent[i] = 0;
+            invalidate();
+        }
+
+        void setTrim(int edge, int percent) {
+            if (edge < 0 || edge >= trimPercent.length) return;
+            trimPercent[edge] = Math.max(
+                    0,
+                    Math.min(DrawingCropMath.MAXIMUM_TRIM_PERCENT, percent));
+            invalidate();
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            if (source == null
+                    || source.isRecycled()
+                    || source.getWidth() <= 0
+                    || source.getHeight() <= 0) return;
+            float scale = Math.min(
+                    (float) getWidth() / source.getWidth(),
+                    (float) getHeight() / source.getHeight());
+            float drawnWidth = source.getWidth() * scale;
+            float drawnHeight = source.getHeight() * scale;
+            float left = (getWidth() - drawnWidth) / 2f;
+            float top = (getHeight() - drawnHeight) / 2f;
+            RectF image = new RectF(left, top, left + drawnWidth, top + drawnHeight);
+            canvas.drawBitmap(source, null, image, imagePaint);
+
+            int[] crop = DrawingCropMath.bounds(
+                    source.getWidth(),
+                    source.getHeight(),
+                    trimPercent[0],
+                    trimPercent[1],
+                    trimPercent[2],
+                    trimPercent[3]);
+            float cropLeft = image.left + image.width() * crop[0] / source.getWidth();
+            float cropTop = image.top + image.height() * crop[1] / source.getHeight();
+            float cropRight = image.left
+                    + image.width() * (crop[0] + crop[2]) / source.getWidth();
+            float cropBottom = image.top
+                    + image.height() * (crop[1] + crop[3]) / source.getHeight();
+            canvas.drawRect(image.left, image.top, image.right, cropTop, shadePaint);
+            canvas.drawRect(image.left, cropBottom, image.right, image.bottom, shadePaint);
+            canvas.drawRect(image.left, cropTop, cropLeft, cropBottom, shadePaint);
+            canvas.drawRect(cropRight, cropTop, image.right, cropBottom, shadePaint);
+            canvas.drawRect(cropLeft, cropTop, cropRight, cropBottom, borderPaint);
+        }
+    }
+
     private static class ZoomPanFrame extends FrameLayout {
         private static final float MINIMUM_SCALE = 1f;
         private static final float MAXIMUM_SCALE = 8f;
@@ -4621,34 +9491,239 @@ public class MainActivity extends Activity {
         private static final float DEFAULT_CANVAS_WIDTH = 1000f;
         private static final float DEFAULT_CANVAS_HEIGHT = 700f;
         private JSONObject verificationDrawing;
+        private JSONArray calculationParts;
         private final Paint fillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint linePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint textBackgroundPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint rectangleDraftFill = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint rectangleDraftLine = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint selectedShapeLine = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private boolean rectangleDrawingEnabled;
+        private float rectangleStartX;
+        private float rectangleStartY;
+        private RectF rectangleDraft;
+        private double rectangleDraftLength;
+        private double rectangleDraftWidth;
+        private int rectangleDraftPieceNumber = 1;
+        private boolean rectangleDraftCountsSquareFeet = true;
+        private boolean rectangleDraftSubtracts;
+        private OnRectangleDrawnListener rectangleDrawnListener;
+        private int selectedShapeIndex = -1;
+        private OnShapeSelectedListener shapeSelectedListener;
+        private int selectedDimensionIndex = -1;
+        private OnDimensionSelectedListener dimensionSelectedListener;
+        private OnDrawingMovedListener drawingMovedListener;
+        private final DrawingDragGesture.Controller dragController =
+                new DrawingDragGesture.Controller();
+        private int dragShapeIndex = -1;
+        private boolean dragRectangleDraft;
+        private boolean ignoreTouchUntilUp;
+
+        interface OnRectangleDrawnListener {
+            void onRectangleDrawn(float left, float top, float right, float bottom);
+        }
+
+        interface OnShapeSelectedListener {
+            void onShapeSelected(int shapeIndex);
+        }
+
+        interface OnDimensionSelectedListener {
+            void onDimensionSelected(int dimensionIndex);
+        }
+
+        interface OnDrawingMovedListener {
+            DrawingDragGesture.AppliedDelta onDrawingMoved(
+                    int shapeIndex,
+                    boolean rectangleDraftSelected,
+                    float deltaX,
+                    float deltaY);
+        }
 
         VerificationDrawingView(Context context) {
             super(context);
             setBackgroundColor(Color.WHITE);
-            setContentDescription("AI verification redraw of the countertop plan. Tap to zoom.");
+            setContentDescription(
+                    "Editable countertop redraw. Tap a measurement to edit it. Tap a piece, then drag it with one finger to move it.");
+            setClickable(true);
+            setFocusable(true);
             fillPaint.setStyle(Paint.Style.FILL);
             linePaint.setStyle(Paint.Style.STROKE);
-            linePaint.setStrokeJoin(Paint.Join.ROUND);
-            linePaint.setStrokeCap(Paint.Cap.ROUND);
+            linePaint.setStrokeJoin(Paint.Join.MITER);
+            linePaint.setStrokeCap(Paint.Cap.SQUARE);
             textPaint.setColor(Color.rgb(45, 45, 45));
             textPaint.setTextAlign(Paint.Align.CENTER);
             textPaint.setTypeface(Typeface.DEFAULT_BOLD);
             textBackgroundPaint.setColor(Color.argb(225, 255, 255, 255));
             textBackgroundPaint.setStyle(Paint.Style.FILL);
+            rectangleDraftFill.setColor(Color.argb(65, 191, 139, 58));
+            rectangleDraftFill.setStyle(Paint.Style.FILL);
+            rectangleDraftLine.setColor(Color.rgb(191, 139, 58));
+            rectangleDraftLine.setStyle(Paint.Style.STROKE);
+            rectangleDraftLine.setStrokeWidth(7f);
+            selectedShapeLine.setColor(Color.rgb(220, 38, 38));
+            selectedShapeLine.setStyle(Paint.Style.STROKE);
+            selectedShapeLine.setStrokeWidth(9f);
         }
 
         void setVerificationDrawing(JSONObject drawing) {
+            if (drawing == null) {
+                verificationDrawing = null;
+            } else {
+                try {
+                    verificationDrawing = new JSONObject(drawing.toString());
+                    DrawingShapeGeometry.orthogonalizeDrawing(verificationDrawing);
+                } catch (Exception ignored) {
+                    verificationDrawing = null;
+                }
+            }
+            invalidate();
+        }
+
+        void setEditableVerificationDrawing(JSONObject drawing) {
             verificationDrawing = drawing;
+            DrawingShapeGeometry.orthogonalizeDrawing(verificationDrawing);
+            invalidate();
+        }
+
+        void setCalculationParts(JSONArray parts) {
+            calculationParts = parts;
             invalidate();
         }
 
         void clearDrawing() {
             verificationDrawing = null;
+            calculationParts = null;
+            rectangleDraft = null;
+            rectangleDraftLength = 0;
+            rectangleDraftWidth = 0;
+            rectangleDrawingEnabled = false;
+            rectangleDrawnListener = null;
+            selectedShapeIndex = -1;
+            shapeSelectedListener = null;
+            selectedDimensionIndex = -1;
+            dimensionSelectedListener = null;
+            drawingMovedListener = null;
+            resetDragGesture();
             invalidate();
+        }
+
+        void setOnShapeSelectedListener(OnShapeSelectedListener listener) {
+            shapeSelectedListener = listener;
+        }
+
+        void setOnDimensionSelectedListener(OnDimensionSelectedListener listener) {
+            dimensionSelectedListener = listener;
+        }
+
+        void setOnDrawingMovedListener(OnDrawingMovedListener listener) {
+            drawingMovedListener = listener;
+        }
+
+        void clearShapeSelection() {
+            selectedShapeIndex = -1;
+            invalidate();
+        }
+
+        void clearRectangleDraft() {
+            rectangleDraft = null;
+            rectangleDrawingEnabled = false;
+            rectangleDrawnListener = null;
+            invalidate();
+        }
+
+        void startRectangleDrawing(OnRectangleDrawnListener listener) {
+            rectangleDraft = null;
+            selectedShapeIndex = -1;
+            selectedDimensionIndex = -1;
+            rectangleDrawnListener = listener;
+            rectangleDrawingEnabled = true;
+            resetDragGesture();
+            setContentDescription(
+                    "AI verification redraw. Drag one corner to the opposite corner to add a rectangle.");
+            invalidate();
+        }
+
+        void setRectangleDraftMeasurements(
+                double length,
+                double width,
+                int pieceNumber,
+                boolean countsSquareFeet,
+                boolean subtracts) {
+            rectangleDraftLength = length;
+            rectangleDraftWidth = width;
+            rectangleDraftPieceNumber = Math.max(1, pieceNumber);
+            rectangleDraftCountsSquareFeet = countsSquareFeet;
+            rectangleDraftSubtracts = subtracts;
+            invalidate();
+        }
+
+        DrawingDragGesture.AppliedDelta shiftRectangle(float deltaX, float deltaY) {
+            if (verificationDrawing == null || rectangleDraft == null) {
+                return DrawingDragGesture.AppliedDelta.none();
+            }
+            float canvasWidth = (float) verificationDrawing.optDouble(
+                    "canvas_width",
+                    DEFAULT_CANVAS_WIDTH);
+            float canvasHeight = (float) verificationDrawing.optDouble(
+                    "canvas_height",
+                    DEFAULT_CANVAS_HEIGHT);
+            if (canvasWidth <= 0 || canvasHeight <= 0) {
+                return DrawingDragGesture.AppliedDelta.none();
+            }
+            float width = rectangleDraft.width();
+            float height = rectangleDraft.height();
+            float previousLeft = rectangleDraft.left;
+            float previousTop = rectangleDraft.top;
+            float left = Math.max(
+                    0,
+                    Math.min(canvasWidth - width, rectangleDraft.left + deltaX));
+            float top = Math.max(
+                    0,
+                    Math.min(canvasHeight - height, rectangleDraft.top + deltaY));
+            DrawingDragGesture.AppliedDelta candidate = DrawingDragGesture.AppliedDelta.of(
+                    left - previousLeft,
+                    top - previousTop);
+            if (!candidate.moved) return candidate;
+            rectangleDraft = new RectF(left, top, left + width, top + height);
+            if (rectangleDrawnListener != null) {
+                rectangleDrawnListener.onRectangleDrawn(
+                        rectangleDraft.left,
+                        rectangleDraft.top,
+                        rectangleDraft.right,
+                        rectangleDraft.bottom);
+            }
+            invalidate();
+            return DrawingDragGesture.AppliedDelta.of(
+                    rectangleDraft.left - previousLeft,
+                    rectangleDraft.top - previousTop);
+        }
+
+        float[] resizeRectangleToMeasurements(double lengthInches, double widthInches) {
+            if (verificationDrawing == null || rectangleDraft == null) return null;
+            rectangleDraftLength = lengthInches;
+            rectangleDraftWidth = widthInches;
+            double[] bounds = DrawingShapeGeometry.rectangleBoundsForMeasurements(
+                    verificationDrawing,
+                    rectangleDraft.left,
+                    rectangleDraft.top,
+                    rectangleDraft.right,
+                    rectangleDraft.bottom,
+                    lengthInches,
+                    widthInches);
+            if (bounds == null) return null;
+            rectangleDraft = new RectF(
+                    (float) bounds[0],
+                    (float) bounds[1],
+                    (float) bounds[2],
+                    (float) bounds[3]);
+            invalidate();
+            return new float[]{
+                    rectangleDraft.left,
+                    rectangleDraft.top,
+                    rectangleDraft.right,
+                    rectangleDraft.bottom
+            };
         }
 
         @Override
@@ -4677,6 +9752,9 @@ public class MainActivity extends Activity {
             canvas.scale(scale, scale);
             JSONArray shapes = verificationDrawing.optJSONArray("shapes");
             JSONArray dimensions = verificationDrawing.optJSONArray("dimensions");
+            List<DrawingPieceSummary.Piece> pieceSummaries = DrawingPieceSummary.summarize(
+                    verificationDrawing,
+                    calculationParts);
             List<BacksplashStrip> backsplashStrips = buildBacksplashStrips(
                     dimensions,
                     shapes,
@@ -4685,7 +9763,385 @@ public class MainActivity extends Activity {
             drawShapes(canvas, shapes, backsplashStrips);
             drawDimensions(canvas, dimensions, shapes, backsplashStrips);
             drawBacksplashDimensions(canvas, backsplashStrips);
+            drawPieceSummaries(canvas, shapes, backsplashStrips, pieceSummaries);
+            if (rectangleDraft != null) {
+                canvas.drawRect(rectangleDraft, rectangleDraftFill);
+                canvas.drawRect(rectangleDraft, rectangleDraftLine);
+                drawRectangleDraftDetails(canvas);
+            }
+            drawSelectedShape(canvas, shapes);
             canvas.restore();
+        }
+
+        @Override
+        public boolean onTouchEvent(MotionEvent event) {
+            if (verificationDrawing == null) return super.onTouchEvent(event);
+            float canvasWidth = (float) verificationDrawing.optDouble(
+                    "canvas_width",
+                    DEFAULT_CANVAS_WIDTH);
+            float canvasHeight = (float) verificationDrawing.optDouble(
+                    "canvas_height",
+                    DEFAULT_CANVAS_HEIGHT);
+            if (canvasWidth <= 0 || canvasHeight <= 0) return false;
+
+            float outerPadding = 20f;
+            float availableWidth = Math.max(1f, getWidth() - outerPadding * 2f);
+            float availableHeight = Math.max(1f, getHeight() - outerPadding * 2f);
+            float scale = Math.min(availableWidth / canvasWidth, availableHeight / canvasHeight);
+            float drawingLeft = (getWidth() - canvasWidth * scale) / 2f;
+            float drawingTop = (getHeight() - canvasHeight * scale) / 2f;
+            float canvasX = Math.max(
+                    0,
+                    Math.min(canvasWidth, (event.getX() - drawingLeft) / scale));
+            float canvasY = Math.max(
+                    0,
+                    Math.min(canvasHeight, (event.getY() - drawingTop) / scale));
+
+            if (!rectangleDrawingEnabled) {
+                if (shapeSelectedListener == null
+                        && dimensionSelectedListener == null
+                        && drawingMovedListener == null) {
+                    return super.onTouchEvent(event);
+                }
+                int action = event.getActionMasked();
+                if (event.getPointerCount() > 1
+                        || action == MotionEvent.ACTION_POINTER_DOWN
+                        || action == MotionEvent.ACTION_POINTER_UP) {
+                    resetDragGesture();
+                    ignoreTouchUntilUp = true;
+                    getParent().requestDisallowInterceptTouchEvent(false);
+                    return true;
+                }
+                if (action == MotionEvent.ACTION_DOWN) {
+                    resetDragGesture();
+                    int dimensionIndex = findDimensionAt(canvasX, canvasY);
+                    if (dimensionIndex < 0 && drawingMovedListener != null) {
+                        float accessibleTolerance = DrawingDragGesture.accessibleRadius(
+                                getResources().getDisplayMetrics().density,
+                                scale);
+                        if (rectangleDraft != null && DrawingDragGesture.contains(
+                                rectangleDraft.left,
+                                rectangleDraft.top,
+                                rectangleDraft.right,
+                                rectangleDraft.bottom,
+                                canvasX,
+                                canvasY,
+                                accessibleTolerance)) {
+                            dragRectangleDraft = true;
+                        } else {
+                            JSONArray shapes = verificationDrawing.optJSONArray("shapes");
+                            dragShapeIndex = DrawingShapeGeometry.findContainingShape(
+                                    shapes,
+                                    canvasX,
+                                    canvasY);
+                            if (dragShapeIndex < 0) {
+                                dragShapeIndex = DrawingShapeGeometry.findNearestShape(
+                                        shapes,
+                                        canvasX,
+                                        canvasY,
+                                        accessibleTolerance);
+                            }
+                        }
+                        if (dragRectangleDraft || dragShapeIndex >= 0) {
+                            dragController.start(canvasX, canvasY);
+                        }
+                    }
+                    return true;
+                }
+                if (action == MotionEvent.ACTION_MOVE) {
+                    if (ignoreTouchUntilUp
+                            || (!dragRectangleDraft && dragShapeIndex < 0)
+                            || drawingMovedListener == null) return true;
+                    float touchSlop = ViewConfiguration.get(getContext()).getScaledTouchSlop()
+                            / Math.max(0.0001f, scale);
+                    DrawingDragGesture.AppliedDelta requested = dragController.requested(
+                            canvasX,
+                            canvasY,
+                            touchSlop);
+                    if (!dragController.isDragging()) return true;
+                    getParent().requestDisallowInterceptTouchEvent(true);
+                    if (!dragRectangleDraft
+                            && dragShapeIndex >= 0
+                            && selectedShapeIndex != dragShapeIndex
+                            && shapeSelectedListener != null) {
+                        selectShape(dragShapeIndex);
+                    }
+                    if (requested.moved) {
+                        DrawingDragGesture.AppliedDelta applied =
+                                drawingMovedListener.onDrawingMoved(
+                                        dragShapeIndex,
+                                        dragRectangleDraft,
+                                        requested.deltaX,
+                                        requested.deltaY);
+                        dragController.applied(applied);
+                    }
+                    return true;
+                }
+                if (action == MotionEvent.ACTION_UP) {
+                    getParent().requestDisallowInterceptTouchEvent(false);
+                    if (ignoreTouchUntilUp) {
+                        resetDragGesture();
+                        return true;
+                    }
+                    if (dragController.isDragging()) {
+                        if (dragRectangleDraft) {
+                            setContentDescription(
+                                    "New rectangle moved. Enter its exact length and width, then save.");
+                        }
+                        resetDragGesture();
+                        performClick();
+                        return true;
+                    }
+                    JSONArray shapes = verificationDrawing.optJSONArray("shapes");
+                    int dimensionIndex = findDimensionAt(canvasX, canvasY);
+                    if (dimensionIndex >= 0 && dimensionSelectedListener != null) {
+                        selectedDimensionIndex = dimensionIndex;
+                        selectedShapeIndex = -1;
+                        dimensionSelectedListener.onDimensionSelected(dimensionIndex);
+                        invalidate();
+                        resetDragGesture();
+                        performClick();
+                        return true;
+                    }
+                    int exactShapeIndex = DrawingShapeGeometry.findContainingShape(
+                            shapes,
+                            canvasX,
+                            canvasY);
+                    if (exactShapeIndex >= 0 && shapeSelectedListener != null) {
+                        resetDragGesture();
+                        selectShape(exactShapeIndex);
+                        return true;
+                    }
+                    float accessibleTolerance = DrawingDragGesture.accessibleRadius(
+                            getResources().getDisplayMetrics().density,
+                            scale);
+                    int nearShapeIndex = DrawingShapeGeometry.findNearestShape(
+                            shapes,
+                            canvasX,
+                            canvasY,
+                            accessibleTolerance);
+                    if (nearShapeIndex >= 0 && shapeSelectedListener != null) {
+                        selectShape(nearShapeIndex);
+                    }
+                    resetDragGesture();
+                    return true;
+                }
+                if (action == MotionEvent.ACTION_CANCEL) {
+                    getParent().requestDisallowInterceptTouchEvent(false);
+                    resetDragGesture();
+                    return true;
+                }
+                return true;
+            }
+
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    rectangleStartX = canvasX;
+                    rectangleStartY = canvasY;
+                    rectangleDraft = new RectF(canvasX, canvasY, canvasX, canvasY);
+                    getParent().requestDisallowInterceptTouchEvent(true);
+                    invalidate();
+                    return true;
+                case MotionEvent.ACTION_MOVE:
+                    rectangleDraft = new RectF(
+                            Math.min(rectangleStartX, canvasX),
+                            Math.min(rectangleStartY, canvasY),
+                            Math.max(rectangleStartX, canvasX),
+                            Math.max(rectangleStartY, canvasY));
+                    invalidate();
+                    return true;
+                case MotionEvent.ACTION_UP:
+                    getParent().requestDisallowInterceptTouchEvent(false);
+                    rectangleDraft = new RectF(
+                            Math.min(rectangleStartX, canvasX),
+                            Math.min(rectangleStartY, canvasY),
+                            Math.max(rectangleStartX, canvasX),
+                            Math.max(rectangleStartY, canvasY));
+                    if (rectangleDraft.width() < 5 || rectangleDraft.height() < 5) {
+                        rectangleDraft = null;
+                        Toast.makeText(
+                                getContext(),
+                                "Drag a larger square or rectangle.",
+                                Toast.LENGTH_SHORT).show();
+                        invalidate();
+                        return true;
+                    }
+                    rectangleDrawingEnabled = false;
+                    setContentDescription(
+                            "AI verification redraw with a new rectangle. Drag it with one finger to move it, then enter its exact length and width.");
+                    if (rectangleDrawnListener != null) {
+                        rectangleDrawnListener.onRectangleDrawn(
+                                rectangleDraft.left,
+                                rectangleDraft.top,
+                                rectangleDraft.right,
+                                rectangleDraft.bottom);
+                    }
+                    invalidate();
+                    performClick();
+                    return true;
+                case MotionEvent.ACTION_CANCEL:
+                    getParent().requestDisallowInterceptTouchEvent(false);
+                    rectangleDraft = null;
+                    invalidate();
+                    return true;
+                default:
+                    return true;
+            }
+        }
+
+        private void resetDragGesture() {
+            dragController.reset();
+            dragShapeIndex = -1;
+            dragRectangleDraft = false;
+            ignoreTouchUntilUp = false;
+        }
+
+        private int findDimensionAt(float x, float y) {
+            JSONArray dimensions = verificationDrawing.optJSONArray("dimensions");
+            JSONArray shapes = verificationDrawing.optJSONArray("shapes");
+            if (dimensions == null) return -1;
+            int bestIndex = -1;
+            float bestDistance = Float.MAX_VALUE;
+            float maximumDistance = 62f;
+            for (int i = 0; i < Math.min(50, dimensions.length()); i++) {
+                JSONObject dimension = dimensions.optJSONObject(i);
+                float[] labelPosition = dimensionLabelPosition(dimension, shapes);
+                if (labelPosition == null) continue;
+                float distance = (float) Math.sqrt(distanceSquared(
+                        x,
+                        y,
+                        labelPosition[0],
+                        labelPosition[1]));
+                if (distance <= maximumDistance && distance < bestDistance) {
+                    bestDistance = distance;
+                    bestIndex = i;
+                }
+            }
+            return bestIndex;
+        }
+
+        private float[] dimensionLabelPosition(JSONObject dimension, JSONArray shapes) {
+            if (dimension == null) return null;
+            float x1 = clamp((float) dimension.optDouble("x1", 0), 0, DEFAULT_CANVAS_WIDTH);
+            float y1 = clamp((float) dimension.optDouble("y1", 0), 0, DEFAULT_CANVAS_HEIGHT);
+            float x2 = clamp((float) dimension.optDouble("x2", 0), 0, DEFAULT_CANVAS_WIDTH);
+            float y2 = clamp((float) dimension.optDouble("y2", 0), 0, DEFAULT_CANVAS_HEIGHT);
+            float dx = x2 - x1;
+            float dy = y2 - y1;
+            float length = (float) Math.sqrt(dx * dx + dy * dy);
+            if (length < 1f) return null;
+            float normalX = -dy / length;
+            float normalY = dx / length;
+            float midpointX = (x1 + x2) / 2f;
+            float midpointY = (y1 + y2) / 2f;
+            float positiveX = midpointX + normalX * 25f;
+            float positiveY = midpointY + normalY * 25f;
+            float negativeX = midpointX - normalX * 25f;
+            float negativeY = midpointY - normalY * 25f;
+            float[] nearestShapeCenter = nearestShapeCenter(midpointX, midpointY, shapes);
+            float positiveDistance = distanceSquared(
+                    positiveX,
+                    positiveY,
+                    nearestShapeCenter[0],
+                    nearestShapeCenter[1]);
+            float negativeDistance = distanceSquared(
+                    negativeX,
+                    negativeY,
+                    nearestShapeCenter[0],
+                    nearestShapeCenter[1]);
+            return positiveDistance >= negativeDistance
+                    ? new float[]{positiveX, positiveY}
+                    : new float[]{negativeX, negativeY};
+        }
+
+        private void drawSelectedShape(Canvas canvas, JSONArray shapes) {
+            JSONObject shape = shapes == null ? null : shapes.optJSONObject(selectedShapeIndex);
+            JSONArray points = shape == null ? null : shape.optJSONArray("points");
+            if (points == null || points.length() < 3) return;
+            Path path = new Path();
+            int valid = 0;
+            for (int i = 0; i < Math.min(32, points.length()); i++) {
+                JSONObject point = points.optJSONObject(i);
+                if (point == null) continue;
+                float x = (float) point.optDouble("x", 0);
+                float y = (float) point.optDouble("y", 0);
+                if (valid++ == 0) path.moveTo(x, y);
+                else path.lineTo(x, y);
+            }
+            if (valid < 3) return;
+            path.close();
+            canvas.drawPath(path, selectedShapeLine);
+        }
+
+        private void selectShape(int shapeIndex) {
+            selectedShapeIndex = shapeIndex;
+            selectedDimensionIndex = -1;
+            shapeSelectedListener.onShapeSelected(shapeIndex);
+            DrawingPieceSummary.Piece selectedPiece = DrawingPieceSummary.forShape(
+                    DrawingPieceSummary.summarize(verificationDrawing, calculationParts),
+                    shapeIndex);
+            setContentDescription(
+                    (selectedPiece == null
+                            ? "Drawing shape"
+                            : "Countertop piece " + selectedPiece.number)
+                            + " selected. Drag it with one finger to move it, or edit its exact length and width.");
+            invalidate();
+            performClick();
+        }
+
+        @Override
+        public void onInitializeAccessibilityNodeInfo(AccessibilityNodeInfo info) {
+            super.onInitializeAccessibilityNodeInfo(info);
+            if (drawingMovedListener == null
+                    || (rectangleDraft == null && selectedShapeIndex < 0)) return;
+            info.addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_LEFT);
+            info.addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_UP);
+            info.addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN);
+            info.addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_RIGHT);
+        }
+
+        @Override
+        public boolean performAccessibilityAction(int action, Bundle arguments) {
+            float deltaX = 0;
+            float deltaY = 0;
+            if (action == AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_LEFT.getId()) {
+                deltaX = -20;
+            } else if (action
+                    == AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_RIGHT.getId()) {
+                deltaX = 20;
+            } else if (action
+                    == AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_UP.getId()) {
+                deltaY = -20;
+            } else if (action
+                    == AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN.getId()) {
+                deltaY = 20;
+            } else {
+                return super.performAccessibilityAction(action, arguments);
+            }
+            boolean draftSelected = rectangleDraft != null;
+            int shapeIndex = draftSelected ? -1 : selectedShapeIndex;
+            if (drawingMovedListener == null || (!draftSelected && shapeIndex < 0)) {
+                return super.performAccessibilityAction(action, arguments);
+            }
+            DrawingDragGesture.AppliedDelta applied = drawingMovedListener.onDrawingMoved(
+                    shapeIndex,
+                    draftSelected,
+                    deltaX,
+                    deltaY);
+            if (applied != null && applied.moved) {
+                announceForAccessibility(draftSelected
+                        ? "New rectangle moved"
+                        : "Selected piece moved");
+                return true;
+            }
+            announceForAccessibility("Piece is at the edge of the redraw");
+            return true;
+        }
+
+        @Override
+        public boolean performClick() {
+            super.performClick();
+            return true;
         }
 
         private void drawShapes(
@@ -4720,6 +10176,10 @@ public class MainActivity extends Activity {
             Path path = new Path();
             float centerX = 0;
             float centerY = 0;
+            float minimumX = Float.MAX_VALUE;
+            float minimumY = Float.MAX_VALUE;
+            float maximumX = -Float.MAX_VALUE;
+            float maximumY = -Float.MAX_VALUE;
             int validPoints = 0;
             for (int pointIndex = 0; pointIndex < Math.min(points.length(), 16); pointIndex++) {
                 JSONObject point = points.optJSONObject(pointIndex);
@@ -4730,6 +10190,10 @@ public class MainActivity extends Activity {
                 else path.lineTo(x, y);
                 centerX += x;
                 centerY += y;
+                minimumX = Math.min(minimumX, x);
+                minimumY = Math.min(minimumY, y);
+                maximumX = Math.max(maximumX, x);
+                maximumY = Math.max(maximumY, y);
                 validPoints++;
             }
             if (validPoints < 3) return;
@@ -4738,25 +10202,418 @@ public class MainActivity extends Activity {
             centerY /= validPoints;
 
             String kind = shape.optString("kind", "countertop");
-            if ("backsplash".equals(kind)) {
-                fillPaint.setColor(Color.rgb(211, 157, 73));
-            } else if ("opening".equals(kind)) {
+            boolean isStove = DrawingRules.isStove(shape);
+            if (isStove) {
                 fillPaint.setColor(Color.WHITE);
+                canvas.drawPath(path, fillPaint);
+                drawStoveSymbol(
+                        canvas,
+                        new RectF(minimumX, minimumY, maximumX, maximumY));
             } else {
-                fillPaint.setColor(Color.rgb(239, 230, 220));
+                if ("backsplash".equals(kind)) {
+                    fillPaint.setColor(Color.rgb(211, 157, 73));
+                } else if ("opening".equals(kind)) {
+                    fillPaint.setColor(Color.WHITE);
+                } else {
+                    fillPaint.setColor(Color.rgb(239, 230, 220));
+                }
+                linePaint.setColor(Color.rgb(91, 58, 41));
+                linePaint.setStrokeWidth(
+                        "backsplash".equals(kind) ? 6f : "opening".equals(kind) ? 5f : 4f);
+                canvas.drawPath(path, fillPaint);
+                canvas.drawPath(path, linePaint);
             }
-            linePaint.setColor(Color.rgb(91, 58, 41));
-            linePaint.setStrokeWidth(
-                    "backsplash".equals(kind) ? 6f : "opening".equals(kind) ? 5f : 4f);
-            canvas.drawPath(path, fillPaint);
-            canvas.drawPath(path, linePaint);
 
             // Model-written shape labels can contain guesses or warning sentences. Only draw a
             // short label that the user deliberately added in the redraw editor.
-            String label = shape.optString("user_label", "").trim();
-            if (!label.isEmpty() && !"backsplash".equals(kind)) {
-                textPaint.setTextSize(32f);
-                drawTextWithBackground(canvas, label, centerX, centerY + 13f);
+            String label = DrawingRules.visibleUserLabel(shape);
+            if (!label.isEmpty() && !label.matches("(?i)^(piece\\s*)?#?\\s*\\d+$")) {
+                textPaint.setTextSize(18f);
+                drawTextWithBackground(
+                        canvas,
+                        label,
+                        centerX,
+                        Math.max(minimumY + 18f, maximumY - 10f));
+            }
+        }
+
+        private void drawPieceSummaries(
+                Canvas canvas,
+                JSONArray shapes,
+                List<BacksplashStrip> backsplashStrips,
+                List<DrawingPieceSummary.Piece> pieces) {
+            if (pieces == null || pieces.isEmpty()) return;
+            ArrayList<DrawingPieceSummary.Piece> formulaOnly = new ArrayList<>();
+            for (DrawingPieceSummary.Piece piece : pieces) {
+                if (piece == null) continue;
+                if (piece.shapeIndex < 0 || shapes == null) {
+                    formulaOnly.add(piece);
+                    continue;
+                }
+                JSONObject shape = shapes.optJSONObject(piece.shapeIndex);
+                if (shape == null) {
+                    formulaOnly.add(piece);
+                    continue;
+                }
+                float[] backsplashPoint = backsplashLabelPoint(piece, backsplashStrips);
+                float[] labelPoint = backsplashPoint != null
+                        ? backsplashPoint
+                        : preferredPieceLabelPoint(shape, piece, pieces);
+                if (labelPoint == null) {
+                    formulaOnly.add(piece);
+                    continue;
+                }
+                boolean backsplash = DrawingRules.isBacksplash(shape)
+                        || backsplashPoint != null;
+                drawPieceLabelBlock(
+                        canvas,
+                        piece.labelLines(),
+                        labelPoint[0],
+                        labelPoint[1],
+                        backsplash,
+                        backsplash ? null : interiorBoundsAt(shape, labelPoint));
+            }
+            drawFormulaOnlyPieceSummaries(canvas, formulaOnly);
+        }
+
+        private void drawFormulaOnlyPieceSummaries(
+                Canvas canvas,
+                List<DrawingPieceSummary.Piece> pieces) {
+            if (pieces == null || pieces.isEmpty()) return;
+            int rowsPerColumn = 6;
+            int columns = Math.max(1, (pieces.size() + rowsPerColumn - 1) / rowsPerColumn);
+            float canvasWidth = verificationDrawing == null
+                    ? DEFAULT_CANVAS_WIDTH
+                    : (float) verificationDrawing.optDouble("canvas_width", DEFAULT_CANVAS_WIDTH);
+            for (int i = 0; i < pieces.size(); i++) {
+                DrawingPieceSummary.Piece piece = pieces.get(i);
+                int column = i / rowsPerColumn;
+                int row = i % rowsPerColumn;
+                float x = canvasWidth * (column + 0.5f) / columns;
+                float y = 42f + row * 70f;
+                drawPieceLabelBlock(canvas, piece.labelLines(), x, y, true, null);
+            }
+        }
+
+        private void drawPieceLabelBlock(
+                Canvas canvas,
+                String[] lines,
+                float centerX,
+                float centerY,
+                boolean compact,
+                RectF preferredBounds) {
+            if (lines == null || lines.length == 0) return;
+            float textSize = compact ? 14f : 19f;
+            textPaint.setColor(Color.rgb(45, 45, 45));
+            Paint.FontMetrics metrics;
+            float lineHeight;
+            float blockHeight;
+            float maximumWidth;
+            do {
+                textPaint.setTextSize(textSize);
+                metrics = textPaint.getFontMetrics();
+                lineHeight = metrics.descent - metrics.ascent + (compact ? 1f : 3f);
+                blockHeight = lineHeight * lines.length;
+                maximumWidth = 0f;
+                for (String line : lines) {
+                    maximumWidth = Math.max(maximumWidth, textPaint.measureText(line));
+                }
+                boolean fitsPreferredBounds = preferredBounds == null
+                        || (maximumWidth + 16f <= preferredBounds.width()
+                        && blockHeight + 10f <= preferredBounds.height());
+                if (fitsPreferredBounds || textSize <= 10f) break;
+                textSize -= 1f;
+            } while (true);
+            float halfWidth = maximumWidth / 2f + 8f;
+            float halfHeight = blockHeight / 2f + 5f;
+            centerX = clamp(centerX, halfWidth + 3f, DEFAULT_CANVAS_WIDTH - halfWidth - 3f);
+            centerY = clamp(centerY, halfHeight + 3f, DEFAULT_CANVAS_HEIGHT - halfHeight - 3f);
+            RectF background = new RectF(
+                    centerX - halfWidth,
+                    centerY - halfHeight,
+                    centerX + halfWidth,
+                    centerY + halfHeight);
+            canvas.drawRoundRect(background, 6f, 6f, textBackgroundPaint);
+            float baseline = centerY - blockHeight / 2f - metrics.ascent;
+            for (String line : lines) {
+                canvas.drawText(line, centerX, baseline, textPaint);
+                baseline += lineHeight;
+            }
+        }
+
+        private float[] backsplashLabelPoint(
+                DrawingPieceSummary.Piece piece,
+                List<BacksplashStrip> strips) {
+            if (piece == null || strips == null) return null;
+            for (BacksplashStrip strip : strips) {
+                if (strip == null || !piece.matchesIdentifier(strip.partId)) continue;
+                float minimumX = Float.MAX_VALUE;
+                float maximumX = -Float.MAX_VALUE;
+                float minimumY = Float.MAX_VALUE;
+                float maximumY = -Float.MAX_VALUE;
+                for (int i = 0; i < 4; i++) {
+                    minimumX = Math.min(minimumX, strip.x[i]);
+                    maximumX = Math.max(maximumX, strip.x[i]);
+                    minimumY = Math.min(minimumY, strip.y[i]);
+                    maximumY = Math.max(maximumY, strip.y[i]);
+                }
+                if (maximumX - minimumX >= maximumY - minimumY) {
+                    float y = minimumY >= 46f ? minimumY - 24f : maximumY + 34f;
+                    return new float[]{(minimumX + maximumX) / 2f, y};
+                }
+                float x = minimumX >= 115f ? minimumX - 64f : maximumX + 64f;
+                return new float[]{x, (minimumY + maximumY) / 2f};
+            }
+            return null;
+        }
+
+        private float[] safestShapeLabelPoint(JSONObject shape) {
+            JSONArray points = shape == null ? null : shape.optJSONArray("points");
+            RectF bounds = shape == null ? new RectF() : shapeBounds(shape);
+            if (points == null || points.length() < 3 || bounds.isEmpty()) return null;
+            float bestX = bounds.centerX();
+            float bestY = bounds.centerY();
+            float bestClearance = pointInsidePolygon(points, bestX, bestY)
+                    ? polygonEdgeClearanceSquared(points, bestX, bestY)
+                    : -1f;
+            for (int row = 1; row <= 7; row++) {
+                float y = bounds.top + bounds.height() * row / 8f;
+                for (int column = 1; column <= 7; column++) {
+                    float x = bounds.left + bounds.width() * column / 8f;
+                    if (!pointInsidePolygon(points, x, y)) continue;
+                    float clearance = polygonEdgeClearanceSquared(points, x, y);
+                    if (clearance > bestClearance) {
+                        bestClearance = clearance;
+                        bestX = x;
+                        bestY = y;
+                    }
+                }
+            }
+            return bestClearance >= 0 ? new float[]{bestX, bestY} : null;
+        }
+
+        private float[] preferredPieceLabelPoint(
+                JSONObject shape,
+                DrawingPieceSummary.Piece piece,
+                List<DrawingPieceSummary.Piece> pieces) {
+            if (shape == null || piece == null) return null;
+            int piecesOnShape = 0;
+            if (pieces != null) {
+                for (DrawingPieceSummary.Piece candidate : pieces) {
+                    if (candidate != null && candidate.shapeIndex == piece.shapeIndex) {
+                        piecesOnShape++;
+                    }
+                }
+            }
+            if (piecesOnShape <= 1 || piece.preferredDimensionIndex < 0) {
+                return safestShapeLabelPoint(shape);
+            }
+            JSONArray dimensions = verificationDrawing == null
+                    ? null
+                    : verificationDrawing.optJSONArray("dimensions");
+            JSONObject guide = dimensions == null
+                    ? null
+                    : dimensions.optJSONObject(piece.preferredDimensionIndex);
+            if (guide == null) return safestShapeLabelPoint(shape);
+            float targetX = ((float) guide.optDouble("x1", 0)
+                    + (float) guide.optDouble("x2", 0)) / 2f;
+            float targetY = ((float) guide.optDouble("y1", 0)
+                    + (float) guide.optDouble("y2", 0)) / 2f;
+            float[] guidedPoint = nearestSafeInteriorPoint(shape, targetX, targetY);
+            return guidedPoint == null ? safestShapeLabelPoint(shape) : guidedPoint;
+        }
+
+        private float[] nearestSafeInteriorPoint(JSONObject shape, float targetX, float targetY) {
+            JSONArray points = shape == null ? null : shape.optJSONArray("points");
+            RectF bounds = shape == null ? new RectF() : shapeBounds(shape);
+            if (points == null || points.length() < 3 || bounds.isEmpty()) return null;
+            float bestX = 0f;
+            float bestY = 0f;
+            float bestDistance = Float.MAX_VALUE;
+            boolean foundWithClearance = false;
+            for (int row = 1; row <= 20; row++) {
+                float y = bounds.top + bounds.height() * row / 21f;
+                for (int column = 1; column <= 20; column++) {
+                    float x = bounds.left + bounds.width() * column / 21f;
+                    if (!pointInsidePolygon(points, x, y)) continue;
+                    float clearance = polygonEdgeClearanceSquared(points, x, y);
+                    boolean clearsLabel = clearance >= 45f * 45f;
+                    if (foundWithClearance && !clearsLabel) continue;
+                    float distance = distanceSquared(x, y, targetX, targetY);
+                    if (clearsLabel && !foundWithClearance) {
+                        foundWithClearance = true;
+                        bestDistance = Float.MAX_VALUE;
+                    }
+                    if (distance < bestDistance) {
+                        bestDistance = distance;
+                        bestX = x;
+                        bestY = y;
+                    }
+                }
+            }
+            return bestDistance < Float.MAX_VALUE ? new float[]{bestX, bestY} : null;
+        }
+
+        private RectF interiorBoundsAt(JSONObject shape, float[] point) {
+            JSONArray points = shape == null ? null : shape.optJSONArray("points");
+            RectF shapeBounds = shape == null ? new RectF() : shapeBounds(shape);
+            if (points == null
+                    || points.length() < 3
+                    || shapeBounds.isEmpty()
+                    || point == null
+                    || point.length < 2
+                    || !pointInsidePolygon(points, point[0], point[1])) {
+                return shapeBounds;
+            }
+            float left = point[0];
+            float right = point[0];
+            float top = point[1];
+            float bottom = point[1];
+            while (left - 2f >= shapeBounds.left
+                    && pointInsidePolygon(points, left - 2f, point[1])) left -= 2f;
+            while (right + 2f <= shapeBounds.right
+                    && pointInsidePolygon(points, right + 2f, point[1])) right += 2f;
+            while (top - 2f >= shapeBounds.top
+                    && pointInsidePolygon(points, point[0], top - 2f)) top -= 2f;
+            while (bottom + 2f <= shapeBounds.bottom
+                    && pointInsidePolygon(points, point[0], bottom + 2f)) bottom += 2f;
+            RectF local = new RectF(left, top, right, bottom);
+            return local.width() > 0 && local.height() > 0 ? local : shapeBounds;
+        }
+
+        private boolean pointInsidePolygon(JSONArray points, float x, float y) {
+            boolean inside = false;
+            int count = Math.min(points.length(), 16);
+            for (int i = 0, previous = count - 1; i < count; previous = i++) {
+                JSONObject a = points.optJSONObject(i);
+                JSONObject b = points.optJSONObject(previous);
+                if (a == null || b == null) continue;
+                float ax = (float) a.optDouble("x", 0);
+                float ay = (float) a.optDouble("y", 0);
+                float bx = (float) b.optDouble("x", 0);
+                float by = (float) b.optDouble("y", 0);
+                boolean crosses = (ay > y) != (by > y)
+                        && x < (bx - ax) * (y - ay) / (by - ay) + ax;
+                if (crosses) inside = !inside;
+            }
+            return inside;
+        }
+
+        private float polygonEdgeClearanceSquared(JSONArray points, float x, float y) {
+            float minimum = Float.MAX_VALUE;
+            int count = Math.min(points.length(), 16);
+            for (int i = 0; i < count; i++) {
+                JSONObject a = points.optJSONObject(i);
+                JSONObject b = points.optJSONObject((i + 1) % count);
+                if (a == null || b == null) continue;
+                minimum = Math.min(minimum, pointSegmentDistanceSquared(
+                        x,
+                        y,
+                        (float) a.optDouble("x", 0),
+                        (float) a.optDouble("y", 0),
+                        (float) b.optDouble("x", 0),
+                        (float) b.optDouble("y", 0)));
+            }
+            return minimum;
+        }
+
+        private float pointSegmentDistanceSquared(
+                float x,
+                float y,
+                float x1,
+                float y1,
+                float x2,
+                float y2) {
+            float dx = x2 - x1;
+            float dy = y2 - y1;
+            float lengthSquared = dx * dx + dy * dy;
+            if (lengthSquared <= 0.0001f) return distanceSquared(x, y, x1, y1);
+            float t = ((x - x1) * dx + (y - y1) * dy) / lengthSquared;
+            t = clamp(t, 0f, 1f);
+            return distanceSquared(x, y, x1 + t * dx, y1 + t * dy);
+        }
+
+        private void drawRectangleDraftDetails(Canvas canvas) {
+            if (rectangleDraft == null
+                    || rectangleDraftLength <= 0
+                    || rectangleDraftWidth <= 0) return;
+            linePaint.setColor(Color.rgb(45, 45, 45));
+            linePaint.setStrokeWidth(3f);
+            float horizontalY = rectangleDraft.top >= 50f
+                    ? rectangleDraft.top - 25f
+                    : Math.min(DEFAULT_CANVAS_HEIGHT - 18f, rectangleDraft.bottom + 25f);
+            drawMeasurementLine(
+                    canvas,
+                    rectangleDraft.left,
+                    horizontalY,
+                    rectangleDraft.right,
+                    horizontalY);
+            float verticalX = rectangleDraft.left >= 50f
+                    ? rectangleDraft.left - 25f
+                    : Math.min(DEFAULT_CANVAS_WIDTH - 18f, rectangleDraft.right + 25f);
+            drawMeasurementLine(
+                    canvas,
+                    verticalX,
+                    rectangleDraft.top,
+                    verticalX,
+                    rectangleDraft.bottom);
+            textPaint.setTextSize(22f);
+            drawTextWithBackground(
+                    canvas,
+                    DrawingPieceSummary.formatInches(rectangleDraftLength),
+                    rectangleDraft.centerX(),
+                    horizontalY - 9f);
+            drawTextWithBackground(
+                    canvas,
+                    DrawingPieceSummary.formatInches(rectangleDraftWidth),
+                    verticalX,
+                    rectangleDraft.centerY() + 8f);
+            if (!rectangleDraftCountsSquareFeet) return;
+            double squareFeet = rectangleDraftLength * rectangleDraftWidth / 144.0;
+            drawPieceLabelBlock(
+                    canvas,
+                    new String[]{
+                            "#" + rectangleDraftPieceNumber,
+                            DrawingPieceSummary.formatDimensionPair(
+                                    rectangleDraftLength,
+                                    rectangleDraftWidth),
+                            (rectangleDraftSubtracts ? "−" : "")
+                                    + DrawingPieceSummary.formatSquareFeet(squareFeet)
+                    },
+                    rectangleDraft.centerX(),
+                    rectangleDraft.centerY(),
+                    false,
+                    rectangleDraft);
+        }
+
+        private void drawStoveSymbol(Canvas canvas, RectF bounds) {
+            if (bounds.isEmpty()) return;
+            float centerX = bounds.centerX();
+            float centerY = bounds.centerY();
+            float width = bounds.width();
+            float height = bounds.height();
+            float smallestSide = Math.min(width, height);
+            if (smallestSide < 20f) return;
+
+            float burnerRadius = Math.max(3f, Math.min(20f, smallestSide * 0.09f));
+            float horizontalOffset = Math.min(
+                    width * 0.28f,
+                    Math.max(0f, width / 2f - burnerRadius - 4f));
+            float verticalOffset = Math.min(
+                    height * 0.28f,
+                    Math.max(0f, height / 2f - burnerRadius - 4f));
+            if (horizontalOffset < burnerRadius
+                    || verticalOffset < burnerRadius) return;
+            linePaint.setColor(Color.rgb(91, 58, 41));
+            linePaint.setStrokeWidth(4f);
+            for (int horizontal = -1; horizontal <= 1; horizontal += 2) {
+                for (int vertical = -1; vertical <= 1; vertical += 2) {
+                    canvas.drawCircle(
+                            centerX + horizontal * horizontalOffset,
+                            centerY + vertical * verticalOffset,
+                            burnerRadius,
+                            linePaint);
+                }
             }
         }
 
@@ -4915,7 +10772,7 @@ public class MainActivity extends Activity {
                 float lengthX2 = strip.x[2] + strip.outwardX * 18f;
                 float lengthY2 = strip.y[2] + strip.outwardY * 18f;
                 drawMeasurementLine(canvas, lengthX1, lengthY1, lengthX2, lengthY2);
-                String lengthLabel = strip.lengthDimension.optString("label", "").trim();
+                String lengthLabel = dimensionDisplayLabel(strip.lengthDimension);
                 if (!lengthLabel.isEmpty()) {
                     drawTextWithBackground(
                             canvas,
@@ -4930,7 +10787,7 @@ public class MainActivity extends Activity {
                     float widthX2 = strip.x[2] + strip.unitX * 18f;
                     float widthY2 = strip.y[2] + strip.unitY * 18f;
                     drawMeasurementLine(canvas, widthX1, widthY1, widthX2, widthY2);
-                    String widthLabel = strip.widthDimension.optString("label", "").trim();
+                    String widthLabel = dimensionDisplayLabel(strip.widthDimension);
                     if (!widthLabel.isEmpty()) {
                         drawTextWithBackground(
                                 canvas,
@@ -5032,6 +10889,21 @@ public class MainActivity extends Activity {
                     : 0;
         }
 
+        private static String dimensionDisplayLabel(JSONObject dimension) {
+            if (dimension == null) return "";
+            double value = positiveValue(dimension.optDouble("value_inches", 0));
+            if (value <= 0) return "";
+            String measurement;
+            if (Math.abs(value - Math.rint(value)) < 0.005) {
+                measurement = String.valueOf((long) Math.rint(value));
+            } else {
+                measurement = String.format(Locale.US, "%.2f", value)
+                        .replaceAll("0+$", "")
+                        .replaceAll("\\.$", "");
+            }
+            return measurement + "\"";
+        }
+
         private static float dimensionLineLength(JSONObject dimension) {
             if (dimension == null) return 0f;
             float dx = (float) (dimension.optDouble("x2", 0)
@@ -5053,6 +10925,9 @@ public class MainActivity extends Activity {
                 JSONObject dimension = dimensions.optJSONObject(i);
                 if (dimension == null) continue;
                 if (belongsToBacksplashStrip(dimension, backsplashStrips)) continue;
+                boolean selected = i == selectedDimensionIndex;
+                linePaint.setColor(selected ? Color.rgb(220, 38, 38) : Color.rgb(25, 25, 25));
+                linePaint.setStrokeWidth(selected ? 7f : 3f);
                 float x1 = clamp((float) dimension.optDouble("x1", 0), 0, DEFAULT_CANVAS_WIDTH);
                 float y1 = clamp((float) dimension.optDouble("y1", 0), 0, DEFAULT_CANVAS_HEIGHT);
                 float x2 = clamp((float) dimension.optDouble("x2", 0), 0, DEFAULT_CANVAS_WIDTH);
@@ -5065,37 +10940,22 @@ public class MainActivity extends Activity {
                 drawArrow(canvas, x1, y1, dx / length, dy / length, false);
                 drawArrow(canvas, x2, y2, dx / length, dy / length, true);
 
-                String label = dimension.optString("label", "").trim();
+                String label = dimensionDisplayLabel(dimension);
                 if (!label.isEmpty()) {
                     textPaint.setTextSize(34f);
-                    float normalX = -dy / length;
-                    float normalY = dx / length;
-                    float midpointX = (x1 + x2) / 2f;
-                    float midpointY = (y1 + y2) / 2f;
-                    float positiveX = midpointX + normalX * 25f;
-                    float positiveY = midpointY + normalY * 25f;
-                    float negativeX = midpointX - normalX * 25f;
-                    float negativeY = midpointY - normalY * 25f;
-                    float[] nearestShapeCenter = nearestShapeCenter(midpointX, midpointY, shapes);
-                    float positiveDistance = distanceSquared(
-                            positiveX,
-                            positiveY,
-                            nearestShapeCenter[0],
-                            nearestShapeCenter[1]);
-                    float negativeDistance = distanceSquared(
-                            negativeX,
-                            negativeY,
-                            nearestShapeCenter[0],
-                            nearestShapeCenter[1]);
-                    float labelX = positiveDistance >= negativeDistance ? positiveX : negativeX;
-                    float labelY = positiveDistance >= negativeDistance ? positiveY : negativeY;
+                    textPaint.setColor(selected ? Color.rgb(220, 38, 38) : Color.rgb(45, 45, 45));
+                    float[] labelPosition = dimensionLabelPosition(dimension, shapes);
+                    if (labelPosition == null) continue;
                     drawTextWithBackground(
                             canvas,
                             label,
-                            labelX,
-                            labelY + 12f);
+                            labelPosition[0],
+                            labelPosition[1] + 12f);
                 }
             }
+            linePaint.setColor(Color.rgb(25, 25, 25));
+            linePaint.setStrokeWidth(3f);
+            textPaint.setColor(Color.rgb(45, 45, 45));
         }
 
         private float[] nearestShapeCenter(float x, float y, JSONArray shapes) {
@@ -5377,17 +11237,100 @@ public class MainActivity extends Activity {
         }
     }
 
+    private static class SignaturePad extends View {
+        private final Paint ink = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint border = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Path signature = new Path();
+        private boolean hasInk;
+
+        SignaturePad(Context context) {
+            super(context);
+            setBackgroundColor(Color.WHITE);
+            setContentDescription("Customer signature box");
+            ink.setColor(Color.BLACK);
+            ink.setStyle(Paint.Style.STROKE);
+            ink.setStrokeWidth(6f);
+            ink.setStrokeCap(Paint.Cap.ROUND);
+            ink.setStrokeJoin(Paint.Join.ROUND);
+            border.setColor(Color.rgb(91, 58, 41));
+            border.setStyle(Paint.Style.STROKE);
+            border.setStrokeWidth(3f);
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas);
+            canvas.drawRect(2, 2, getWidth() - 2, getHeight() - 2, border);
+            canvas.drawPath(signature, ink);
+        }
+
+        @Override
+        public boolean onTouchEvent(MotionEvent event) {
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    signature.moveTo(event.getX(), event.getY());
+                    hasInk = true;
+                    getParent().requestDisallowInterceptTouchEvent(true);
+                    invalidate();
+                    return true;
+                case MotionEvent.ACTION_MOVE:
+                    signature.lineTo(event.getX(), event.getY());
+                    invalidate();
+                    return true;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    getParent().requestDisallowInterceptTouchEvent(false);
+                    invalidate();
+                    return true;
+                default:
+                    return super.onTouchEvent(event);
+            }
+        }
+
+        boolean hasInk() {
+            return hasInk;
+        }
+
+        void clear() {
+            signature.reset();
+            hasInk = false;
+            invalidate();
+        }
+
+        Bitmap toBitmap() {
+            int width = Math.max(1, getWidth());
+            int height = Math.max(1, getHeight());
+            Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+            Canvas canvas = new Canvas(bitmap);
+            draw(canvas);
+            return bitmap;
+        }
+    }
+
     private static class Estimate {
+        final double aiSquareFeet;
+        final double manualSquareFeet;
         final double gross;
         final double stove;
         final double net;
         final double total;
+        final boolean hasAiDrawings;
 
-        Estimate(double gross, double stove, double net, double total) {
+        Estimate(
+                double aiSquareFeet,
+                double manualSquareFeet,
+                double gross,
+                double stove,
+                double net,
+                double total,
+                boolean hasAiDrawings) {
+            this.aiSquareFeet = aiSquareFeet;
+            this.manualSquareFeet = manualSquareFeet;
             this.gross = gross;
             this.stove = stove;
             this.net = net;
             this.total = total;
+            this.hasAiDrawings = hasAiDrawings;
         }
     }
 }
