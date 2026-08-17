@@ -21,15 +21,14 @@ public final class DrawingRetryPolicy {
         return failedWithoutResult || (hasResult && !canCalculate);
     }
 
-    /** A darker copy is tried once only when the normal cropped photo is incomplete. */
+    /**
+     * Automatic darker retries are disabled so one drawing never starts a second long AI
+     * request without the user choosing it. The manual enhanced-retry offer remains available.
+     */
     public static boolean automaticallyTryEnhanced(
             boolean enhancedWasAlreadyRequested,
             DrawingRecord result) {
-        return !enhancedWasAlreadyRequested
-                && result != null
-                && result.hasResult()
-                && (!result.canCalculate
-                || !DrawingFallback.hasDrawableShape(result.verificationDrawing));
+        return false;
     }
 
     /** Never replace a more useful normal-color result with a poorer enhanced result. */

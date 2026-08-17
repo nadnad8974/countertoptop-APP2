@@ -20,6 +20,7 @@ Measurement contract:
 - `width_inches` is the front-to-back depth; model roles use `width`, never `depth`.
 - Every calculation part represents one rectangle and must have `quantity: 1`.
 - Every area calculation part has exactly one linked editable shape. If the model omits it, the server supplies a safe placeholder and requires user verification before calculation.
+- When geometry is recognizable but a required measurement is absent or unclear, the model is instructed to return the visible editable shape promptly with a null measurement. Deterministic validation asks the user directly instead of waiting for or accepting a guess.
 - A linked `length` or `width` dimension must match the value used by its calculation part within 0.01 inch. If it does not, the annotation stays visible and editable, the conflicting calculation value is cleared, and user verification is required before calculation.
 - Every numeric area-affecting length or width must have linked visible measurement evidence with the same value and role (except the server-applied stove length default). Text classified as a piece label, identifier, square-foot annotation, inside-shape note, or unknown is never measurement evidence.
 - Ambiguous text such as `#4` versus `14`, and annotations such as `0 sq ft`, are cleared from deterministic math and become a direct correction question instead of a guessed dimension.
@@ -59,10 +60,14 @@ Deploy this directory as its own Vercel project only after the exact Vercel acco
 
 - `OPENAI_API_KEY` (required; Responses Write permission only)
 - `RAMSIERS_DRAWING_DEVICE_TOKEN_HASHES` (required and Sensitive; a compact JSON object containing at most 20 provisioned devices)
-- `OPENAI_DRAWING_MODEL` (optional; defaults to the explicit `gpt-5.6-sol` model ID)
-- `OPENAI_DRAWING_FALLBACK_MODEL` (optional; defaults to off. If explicitly set to a model ID, it is tried only for model-unavailable errors.)
-- `OPENAI_REASONING_EFFORT` (optional A/B control; accepts only `medium` or `high` and defaults to `high`)
-- `OPENAI_TIMEOUT_MS` (optional; defaults to `160000` and is clamped to `15000`-`165000`, below the function's 180-second maximum)
+
+Production analysis is fixed in code to the exact `gpt-5.6-sol` model, original
+image detail, `medium` reasoning, one Responses API request, no fallback, and a
+`90000` ms timeout. Stale `OPENAI_DRAWING_MODEL`,
+`OPENAI_DRAWING_FALLBACK_MODEL`, `OPENAI_REASONING_EFFORT`, and
+`OPENAI_TIMEOUT_MS` values are ignored and should be removed during the next
+authorized Vercel environment cleanup. Do not add those variables to a new
+deployment.
 
 Endpoint: `POST /api/analyze`
 

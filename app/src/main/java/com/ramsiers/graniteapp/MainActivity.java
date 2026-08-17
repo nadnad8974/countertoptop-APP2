@@ -44,6 +44,8 @@ import android.view.ScaleGestureDetector;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
+import android.view.ViewConfiguration;
+import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.ArrayAdapter;
@@ -70,14 +72,17 @@ import androidx.exifinterface.media.ExifInterface;
 import com.google.zxing.BarcodeFormat;
 import com.google.zxing.integration.android.IntentIntegrator;
 import com.google.zxing.integration.android.IntentResult;
+import com.ramsiers.graniteapp.drawing.DrawingAnalysisFailurePolicy;
 import com.ramsiers.graniteapp.drawing.DrawingApiRequest;
 import com.ramsiers.graniteapp.drawing.DrawingCropMath;
 import com.ramsiers.graniteapp.drawing.DrawingCropSourcePolicy;
+import com.ramsiers.graniteapp.drawing.DrawingDragGesture;
 import com.ramsiers.graniteapp.drawing.DrawingFallback;
 import com.ramsiers.graniteapp.drawing.DrawingImageEnhancer;
 import com.ramsiers.graniteapp.drawing.DrawingMath;
 import com.ramsiers.graniteapp.drawing.DrawingMissingMeasurementPolicy;
 import com.ramsiers.graniteapp.drawing.DrawingPieceSummary;
+import com.ramsiers.graniteapp.drawing.DrawingProgressText;
 import com.ramsiers.graniteapp.drawing.DrawingRecord;
 import com.ramsiers.graniteapp.drawing.DrawingRectangleFactory;
 import com.ramsiers.graniteapp.drawing.DrawingRetryPolicy;
@@ -103,6 +108,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
+import java.net.SocketTimeoutException;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -116,6 +122,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import java.util.Date;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.PBEKeySpec;
@@ -153,6 +160,8 @@ public class MainActivity extends Activity {
             "Drawing AI is not connected on this phone. Ask the owner to connect it in Admin settings.";
     private static final String DRAWING_AI_INVALID_CONNECTION_ERROR =
             "This phone's Drawing AI connection is not valid. Ask the owner to reconnect it in Admin settings.";
+    private static final int DRAWING_HTTP_DEADLINE_MILLIS =
+            DrawingAnalysisFailurePolicy.requestDeadlineMillis(90000);
     private static final String PAYMENT_LINK_ENDPOINT =
             "https://ramsiers-payment-service.vercel.app/api/create-payment-link";
     private static final String PRICE_CUTOUT = "price_cutout";
@@ -333,6 +342,8 @@ public class MainActivity extends Activity {
     private volatile int drawingAnalysisRequestId;
     private long drawingAnalysisStartedAt;
     private int drawingProgressFloor;
+    private boolean activityResumed;
+    private int pendingTimeoutRecoveryRevision = -1;
 
     private TextView squareFootResult;
     private TextView totalResult;
@@ -411,6 +422,19 @@ public class MainActivity extends Activity {
         outState.putInt(STATE_PENDING_QR_SCAN_PURPOSE, pendingQrScanPurpose);
         outState.putInt(STATE_STEP_INDEX, stepIndex);
         super.onSaveInstanceState(outState);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        activityResumed = true;
+        maybeOpenPendingTimeoutRecovery();
+    }
+
+    @Override
+    protected void onPause() {
+        activityResumed = false;
+        super.onPause();
     }
 
     private void restoreDrawingState(Bundle state) {
@@ -773,7 +797,28 @@ public class MainActivity extends Activity {
             showQuestionPage(pageOrder.get(stepIndex));
         }
 
-        scroll.post(() -> scroll.smoothScrollTo(0, 0));
+        scroll.post(() -> {
+            scroll.smoothScrollTo(0, 0);
+            maybeOpenPendingTimeoutRecovery();
+        });
+    }
+
+    private void maybeOpenPendingTimeoutRecovery() {
+        if (pendingTimeoutRecoveryRevision < 0) return;
+        if (pendingTimeoutRecoveryRevision != drawingInputRevision) {
+            pendingTimeoutRecoveryRevision = -1;
+            return;
+        }
+        if (!DrawingAnalysisFailurePolicy.shouldOpenTimeoutRecovery(
+                pendingTimeoutRecoveryRevision,
+                drawingInputRevision,
+                activityResumed,
+                currentPageId() == PAGE_PHOTO,
+                isFinishing(),
+                drawingEditDialog != null)) return;
+        int revision = pendingTimeoutRecoveryRevision;
+        pendingTimeoutRecoveryRevision = -1;
+        openEditableDrawingAfterTimeout(revision);
     }
 
     private void showQuestionPage(int pageId) {
@@ -4754,6 +4799,7 @@ public class MainActivity extends Activity {
 
         new Thread(() -> {
             int failureCount = 0;
+            Uri firstTimedOutDrawing = null;
             for (int i = 0; i < requestDrawingUris.size(); i++) {
                 if (requestId != drawingAnalysisRequestId
                         || requestRevision != drawingInputRevision) return;
@@ -4767,26 +4813,10 @@ public class MainActivity extends Activity {
                             drawingNumber,
                             requestDrawingUris.size(),
                             enhanced);
-                    if (DrawingRetryPolicy.automaticallyTryEnhanced(enhanced, result)) {
-                        postDrawingProgress(
-                                requestId,
-                                45 + (int) Math.round(
-                                        45.0 * (drawingNumber - 1) / requestDrawingUris.size()),
-                                "Trying a darker copy of drawing " + drawingNumber
-                                        + " because the first reading was incomplete");
-                        try {
-                            DrawingRecord darkerResult = requestSingleDrawingAnalysis(
-                                    uri,
-                                    requestId,
-                                    requestRevision,
-                                    drawingNumber,
-                                    requestDrawingUris.size(),
-                                    true);
-                            result = DrawingRetryPolicy.preferMoreUseful(result, darkerResult);
-                        } catch (Exception darkerException) {
-                            result = result.withError(
-                                    "The normal photo result was kept because the darker retry could not finish.");
-                        }
+                    if (enhanced) {
+                        result = DrawingRetryPolicy.preferMoreUseful(
+                                previousRecordsByUri.get(uri.toString()),
+                                result);
                     }
                     DrawingRecord resultToStore = result;
                     runOnUiThread(() -> storeDrawingResult(uri, resultToStore));
@@ -4797,17 +4827,24 @@ public class MainActivity extends Activity {
                     String message = exception.getMessage() == null
                             ? "The drawing could not be analyzed. Please try again."
                             : exception.getMessage();
+                    boolean timedOut = DrawingAnalysisFailurePolicy.isTimeout(exception, message);
+                    if (firstTimedOutDrawing == null && timedOut) {
+                        firstTimedOutDrawing = uri;
+                    }
                     DrawingRecord previous = previousRecordsByUri.get(uri.toString());
                     if (previous == null) previous = DrawingRecord.empty(uri.toString());
                     DrawingRecord failed = previous.withError(message);
                     runOnUiThread(() -> storeDrawingResult(uri, failed));
+                    if (timedOut) break;
                 }
             }
             final int completedFailureCount = failureCount;
+            final Uri completedTimedOutDrawing = firstTimedOutDrawing;
             runOnUiThread(() -> finishDrawingBatch(
                     requestId,
                     requestRevision,
-                    completedFailureCount));
+                    completedFailureCount,
+                    completedTimedOutDrawing));
         }).start();
     }
 
@@ -4837,6 +4874,16 @@ public class MainActivity extends Activity {
         }
 
         HttpURLConnection connection = (HttpURLConnection) new URL(DRAWING_AI_ENDPOINT).openConnection();
+        AtomicBoolean requestDeadlineExceeded = new AtomicBoolean(false);
+        Runnable requestDeadline = () -> {
+            boolean disconnect;
+            synchronized (drawingConnectionLock) {
+                disconnect = activeDrawingConnection == connection;
+                if (disconnect) requestDeadlineExceeded.set(true);
+            }
+            if (disconnect) connection.disconnect();
+        };
+        drawingProgressHandler.postDelayed(requestDeadline, DRAWING_HTTP_DEADLINE_MILLIS);
         try {
             synchronized (drawingConnectionLock) {
                 if (requestId != drawingAnalysisRequestId
@@ -4848,7 +4895,9 @@ public class MainActivity extends Activity {
             }
             connection.setRequestMethod("POST");
             connection.setConnectTimeout(30000);
-            connection.setReadTimeout(240000);
+            // The service stops model work at 90 seconds. Keep only a small transport margin so
+            // a broken gateway cannot leave the phone waiting at 90% for four minutes.
+            connection.setReadTimeout(DRAWING_HTTP_DEADLINE_MILLIS);
             connection.setDoOutput(true);
             connection.setInstanceFollowRedirects(false);
             connection.setChunkedStreamingMode(8192);
@@ -4883,6 +4932,9 @@ public class MainActivity extends Activity {
             if (responseCode == HttpURLConnection.HTTP_UNAUTHORIZED) {
                 throw new IllegalStateException(DRAWING_AI_INVALID_CONNECTION_ERROR);
             }
+            if (DrawingAnalysisFailurePolicy.isTimeoutHttpStatus(responseCode)) {
+                throw new SocketTimeoutException("Drawing AI took too long to respond.");
+            }
             InputStream responseStream = responseCode >= 200 && responseCode < 300
                     ? connection.getInputStream()
                     : connection.getErrorStream();
@@ -4896,7 +4948,16 @@ public class MainActivity extends Activity {
                     drawingUri.toString(),
                     requestRevision,
                     response);
+        } catch (Exception failure) {
+            if (requestDeadlineExceeded.get()) {
+                SocketTimeoutException timeout = new SocketTimeoutException(
+                        "Drawing AI took too long to respond.");
+                timeout.initCause(failure);
+                throw timeout;
+            }
+            throw failure;
         } finally {
+            drawingProgressHandler.removeCallbacks(requestDeadline);
             connection.disconnect();
             synchronized (drawingConnectionLock) {
                 if (activeDrawingConnection == connection) activeDrawingConnection = null;
@@ -4913,14 +4974,37 @@ public class MainActivity extends Activity {
         persistDrawingState();
     }
 
-    private void finishDrawingBatch(int requestId, int requestRevision, int failureCount) {
+    private void finishDrawingBatch(
+            int requestId,
+            int requestRevision,
+            int failureCount,
+            Uri timedOutDrawing) {
         if (requestId != drawingAnalysisRequestId
                 || requestRevision != drawingInputRevision) return;
+        if (timedOutDrawing != null) {
+            int timedOutIndex = drawingPhotoUris.indexOf(timedOutDrawing);
+            if (timedOutIndex >= 0 && timedOutIndex < drawingRecords.size()) {
+                activeDrawingIndex = timedOutIndex;
+            }
+        }
         loadActiveDrawingResult(true);
         updateDrawingStatusText();
-        finishDrawingProgress(requestId);
+        if (timedOutDrawing != null) {
+            int timeoutNumber = Math.max(1, drawingPhotoUris.indexOf(timedOutDrawing) + 1);
+            finishDrawingTimeoutProgress(
+                    requestId,
+                    timeoutNumber,
+                    Math.max(1, drawingPhotoUris.size()));
+        } else {
+            finishDrawingProgress(requestId);
+        }
         calculateAndDisplay(false);
         showStep();
+        if (timedOutDrawing != null) {
+            pendingTimeoutRecoveryRevision = requestRevision;
+            maybeOpenPendingTimeoutRecovery();
+            return;
+        }
         if (failureCount == 0
                 && currentPageId() == PAGE_PHOTO
                 && DrawingMissingMeasurementPolicy.shouldAsk(
@@ -4977,10 +5061,10 @@ public class MainActivity extends Activity {
                     stage = "Creating verification redraw";
                 }
                 drawingProgressBar.setProgress(estimated);
-                drawingProgressText.setText(
-                        "Estimated progress: " + estimated + "%\n"
-                                + stage + " — AI is still working ("
-                                + elapsedSeconds + " seconds)");
+                drawingProgressText.setText(DrawingProgressText.estimatedStatus(
+                        estimated,
+                        stage,
+                        elapsedSeconds));
                 drawingProgressHandler.postDelayed(this, 1000);
             }
         };
@@ -4993,9 +5077,13 @@ public class MainActivity extends Activity {
             drawingProgressFloor = Math.max(drawingProgressFloor, Math.min(90, minimum));
             int progress = Math.max(drawingProgressBar.getProgress(), drawingProgressFloor);
             drawingProgressBar.setProgress(progress);
-            drawingProgressText.setText(
-                    "Estimated progress: " + progress + "%\n"
-                            + stage + " — AI is still working");
+            long elapsedSeconds = Math.max(
+                    0,
+                    (SystemClock.elapsedRealtime() - drawingAnalysisStartedAt) / 1000);
+            drawingProgressText.setText(DrawingProgressText.estimatedStatus(
+                    progress,
+                    stage,
+                    elapsedSeconds));
         });
     }
 
@@ -5024,7 +5112,27 @@ public class MainActivity extends Activity {
         }
         drawingProgressText.setText(
                 "100% complete — " + completedWork + " in "
-                        + elapsedSeconds + " seconds");
+                + elapsedSeconds + " seconds");
+    }
+
+    private void finishDrawingTimeoutProgress(
+            int requestId,
+            int drawingNumber,
+            int drawingCount) {
+        if (requestId != drawingAnalysisRequestId) return;
+        drawingAnalysisInProgress = false;
+        if (drawingProgressRunnable != null) {
+            drawingProgressHandler.removeCallbacks(drawingProgressRunnable);
+        }
+        long elapsedSeconds = Math.max(
+                0,
+                (SystemClock.elapsedRealtime() - drawingAnalysisStartedAt) / 1000);
+        drawingProgressBar.setVisibility(View.GONE);
+        drawingProgressText.setVisibility(View.VISIBLE);
+        drawingProgressText.setText(DrawingProgressText.timeoutStatus(
+                drawingNumber,
+                drawingCount,
+                elapsedSeconds));
     }
 
     private void cancelDrawingAnalysis() {
@@ -5472,6 +5580,27 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void openEditableDrawingAfterTimeout(int requestRevision) {
+        if (requestRevision != drawingInputRevision || isFinishing()) return;
+        DrawingRecord previous = activeDrawingRecord();
+        if (previous == null) return;
+        DrawingRecord editable = previous.editableAfterTimeout(
+                requestRevision,
+                previous.lastError.isEmpty()
+                        ? "Drawing AI took too long to respond."
+                        : previous.lastError);
+        drawingRecords.set(activeDrawingIndex, editable);
+        loadActiveDrawingResult(true);
+        persistDrawingState();
+        Toast.makeText(
+                this,
+                editable.canCalculate
+                        ? "AI took too long. Your saved measurements were kept and are ready to edit."
+                        : "AI took too long. Draw or select each piece and enter its exact measurements.",
+                Toast.LENGTH_LONG).show();
+        showVerificationEditor(!editable.canCalculate);
+    }
+
     private void showVerificationEditor() {
         showVerificationEditor(false);
     }
@@ -5552,6 +5681,7 @@ public class MainActivity extends Activity {
         TextView instructions = label(
                 instructionText
                         + "Tap a displayed measurement on the redraw to change it. "
+                        + "Tap a piece to select it, then drag it with one finger to move it. "
                         + "The outline is a verification guide and model-written descriptions are hidden.");
         instructions.setTextSize(15);
         content.addView(instructions);
@@ -5581,8 +5711,8 @@ public class MainActivity extends Activity {
         addedAreaWidth.setImeOptions(EditorInfo.IME_ACTION_DONE);
 
         TextView rectangleStatus = label(
-                "Tap an existing countertop piece above to add its missing measurements, "
-                        + "or draw a new rectangle.");
+                "Tap a piece to select it and drag it to move it, or draw a new rectangle. "
+                        + "Enter exact L and W measurements below.");
         rectangleStatus.setTextSize(14);
         rectangleStatus.setGravity(Gravity.CENTER);
 
@@ -5592,9 +5722,7 @@ public class MainActivity extends Activity {
         content.addView(preview, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(300)));
 
-        // Keep the controls needed while looking at the redraw outside the ScrollView. On the
-        // phone-sized editor the 300dp preview otherwise pushes the move arrows below the fold,
-        // which makes them appear to have been removed.
+        // Keep the compact draw and measurement controls visible while looking at the redraw.
         LinearLayout controlsPanel = new LinearLayout(this);
         controlsPanel.setOrientation(LinearLayout.VERTICAL);
         controlsPanel.setPadding(dp(14), dp(3), dp(14), dp(7));
@@ -5633,50 +5761,6 @@ public class MainActivity extends Activity {
         addedAreaTypeParams.setMargins(0, dp(1), 0, dp(1));
         controlsPanel.addView(addedAreaType, addedAreaTypeParams);
 
-        TextView moveLabel = label("Select a piece to move");
-        moveLabel.setTextSize(13);
-        moveLabel.setGravity(Gravity.CENTER);
-        moveLabel.setSingleLine(true);
-        moveLabel.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        controlsPanel.addView(moveLabel);
-        LinearLayout moveRow = new LinearLayout(this);
-        moveRow.setOrientation(LinearLayout.HORIZONTAL);
-        moveRow.setGravity(Gravity.CENTER);
-        Button moveLeft = compactDialogButton("←");
-        Button moveUp = compactDialogButton("↑");
-        Button moveDown = compactDialogButton("↓");
-        Button moveRight = compactDialogButton("→");
-        Button[] moveButtons = {moveLeft, moveUp, moveDown, moveRight};
-        String[] moveDescriptions = {
-                "Move selected piece left",
-                "Move selected piece up",
-                "Move selected piece down",
-                "Move selected piece right"
-        };
-        for (int i = 0; i < moveButtons.length; i++) {
-            moveButtons[i].setContentDescription(moveDescriptions[i]);
-        }
-        for (Button moveButton : moveButtons) {
-            LinearLayout.LayoutParams moveParams = new LinearLayout.LayoutParams(
-                    0,
-                    dp(48),
-                    1f);
-            moveParams.setMargins(dp(2), dp(2), dp(2), dp(2));
-            moveRow.addView(moveButton, moveParams);
-        }
-        moveLeft.setOnClickListener(v -> moveSelectedPieceOrRectangle(
-                preview, workingDrawing, selectedExistingShape, movedShapeOffsets,
-                moveLabel, rectangleStatus, -20, 0));
-        moveUp.setOnClickListener(v -> moveSelectedPieceOrRectangle(
-                preview, workingDrawing, selectedExistingShape, movedShapeOffsets,
-                moveLabel, rectangleStatus, 0, -20));
-        moveDown.setOnClickListener(v -> moveSelectedPieceOrRectangle(
-                preview, workingDrawing, selectedExistingShape, movedShapeOffsets,
-                moveLabel, rectangleStatus, 0, 20));
-        moveRight.setOnClickListener(v -> moveSelectedPieceOrRectangle(
-                preview, workingDrawing, selectedExistingShape, movedShapeOffsets,
-                moveLabel, rectangleStatus, 20, 0));
-        controlsPanel.addView(moveRow);
         rectangleStatus.setTextSize(12);
         rectangleStatus.setSingleLine(true);
         rectangleStatus.setEllipsize(android.text.TextUtils.TruncateAt.END);
@@ -5839,7 +5923,8 @@ public class MainActivity extends Activity {
             }
             selectedExistingShape[0] = -1;
             preview.clearShapeSelection();
-            moveLabel.setText("Select a piece to move");
+            preview.clearRectangleDraft();
+            for (int i = 0; i < drawnRectangle.length; i++) drawnRectangle[i] = Float.NaN;
             updatingEditorFields[0] = true;
             addedAreaType.setSelection(0);
             addedAreaLength.setText("");
@@ -5861,6 +5946,7 @@ public class MainActivity extends Activity {
             JSONObject shape = shapes == null ? null : shapes.optJSONObject(shapeIndex);
             if (shape == null) return;
             selectedExistingShape[0] = shapeIndex;
+            preview.clearRectangleDraft();
             for (int i = 0; i < drawnRectangle.length; i++) drawnRectangle[i] = Float.NaN;
             DrawingShapeMeasurementEditor.Values values =
                     DrawingShapeMeasurementEditor.existingValues(
@@ -5899,10 +5985,24 @@ public class MainActivity extends Activity {
             String selectedPieceName = selectedPiece == null
                     ? "selected shape"
                     : "piece #" + selectedPiece.number;
-            moveLabel.setText("Move " + selectedPieceName);
             rectangleStatus.setText(
                     (selectedPiece == null ? "Selected shape" : "Piece #" + selectedPiece.number)
-                            + " selected. Enter its exact length and width, then tap Save.");
+                            + " selected. Drag it to move it, or enter its exact length and width, then tap Save.");
+        });
+        preview.setOnDrawingMovedListener((shapeIndex, rectangleDraftSelected, deltaX, deltaY) -> {
+            if (rectangleDraftSelected) {
+                selectedExistingShape[0] = -1;
+            } else if (shapeIndex >= 0) {
+                selectedExistingShape[0] = shapeIndex;
+            }
+            return moveSelectedPieceOrRectangle(
+                    preview,
+                    workingDrawing,
+                    selectedExistingShape,
+                    movedShapeOffsets,
+                    rectangleStatus,
+                    deltaX,
+                    deltaY);
         });
         TextWatcher selectedPieceSizeWatcher = new TextWatcher() {
             @Override public void beforeTextChanged(
@@ -6010,7 +6110,6 @@ public class MainActivity extends Activity {
         drawRectangle.setOnClickListener(v -> {
             selectedExistingShape[0] = -1;
             preview.clearShapeSelection();
-            moveLabel.setText("Move new rectangle");
             double enteredLength = positiveDrawingValue(addedAreaLength.getText().toString());
             double enteredWidth = positiveDrawingValue(addedAreaWidth.getText().toString());
             int enteredSelection = addedAreaType.getSelectedItemPosition();
@@ -6048,7 +6147,7 @@ public class MainActivity extends Activity {
                         selection > 0 && selection != 3,
                         selection == 4 || selection == 5);
                 rectangleStatus.setText(
-                        "Rectangle ready. Use the arrows to move it, then tap Save.");
+                        "Rectangle ready. Drag it with one finger to move it, then tap Save.");
             });
             rectangleStatus.setText("Drag one corner to the opposite corner on the redraw above.");
         });
@@ -6129,12 +6228,11 @@ public class MainActivity extends Activity {
         return button;
     }
 
-    private void moveSelectedPieceOrRectangle(
+    private DrawingDragGesture.AppliedDelta moveSelectedPieceOrRectangle(
             VerificationDrawingView preview,
             JSONObject workingDrawing,
             int[] selectedExistingShape,
             HashMap<Integer, double[]> movedShapeOffsets,
-            TextView moveLabel,
             TextView status,
             float deltaX,
             float deltaY) {
@@ -6162,31 +6260,27 @@ public class MainActivity extends Activity {
                                 workingDrawing,
                                 aiDrawingCalculationParts),
                         selectedShapeIndex);
-                String selectedPieceName = selectedPiece == null
-                        ? "selected shape"
-                        : "piece #" + selectedPiece.number;
-                moveLabel.setText("Move " + selectedPieceName);
                 status.setText(
                         (selectedPiece == null ? "Selected shape" : "Piece #" + selectedPiece.number)
                                 + " moved. Tap Save to keep its position.");
                 preview.invalidate();
+                return DrawingDragGesture.AppliedDelta.of(
+                        (float) result.deltaX,
+                        (float) result.deltaY);
             } else {
-                Toast.makeText(
-                        this,
-                        "That piece cannot move farther in that direction.",
-                        Toast.LENGTH_SHORT).show();
+                status.setText("That piece is at the edge of the redraw.");
             }
-            return;
+            return DrawingDragGesture.AppliedDelta.none();
         }
-        if (preview != null && preview.shiftRectangle(deltaX, deltaY)) {
-            moveLabel.setText("Move new rectangle");
+        DrawingDragGesture.AppliedDelta rectangleMove = preview == null
+                ? DrawingDragGesture.AppliedDelta.none()
+                : preview.shiftRectangle(deltaX, deltaY);
+        if (rectangleMove.moved) {
             status.setText("New rectangle moved. Tap Save to keep it.");
-            return;
+            return rectangleMove;
         }
-        Toast.makeText(
-                this,
-                "Tap a piece first, or draw a new rectangle.",
-                Toast.LENGTH_SHORT).show();
+        status.setText("Tap a piece first, or draw a new rectangle.");
+        return DrawingDragGesture.AppliedDelta.none();
     }
 
     private void refreshVerificationEditorPreview(
@@ -9419,6 +9513,12 @@ public class MainActivity extends Activity {
         private OnShapeSelectedListener shapeSelectedListener;
         private int selectedDimensionIndex = -1;
         private OnDimensionSelectedListener dimensionSelectedListener;
+        private OnDrawingMovedListener drawingMovedListener;
+        private final DrawingDragGesture.Controller dragController =
+                new DrawingDragGesture.Controller();
+        private int dragShapeIndex = -1;
+        private boolean dragRectangleDraft;
+        private boolean ignoreTouchUntilUp;
 
         interface OnRectangleDrawnListener {
             void onRectangleDrawn(float left, float top, float right, float bottom);
@@ -9432,11 +9532,21 @@ public class MainActivity extends Activity {
             void onDimensionSelected(int dimensionIndex);
         }
 
+        interface OnDrawingMovedListener {
+            DrawingDragGesture.AppliedDelta onDrawingMoved(
+                    int shapeIndex,
+                    boolean rectangleDraftSelected,
+                    float deltaX,
+                    float deltaY);
+        }
+
         VerificationDrawingView(Context context) {
             super(context);
             setBackgroundColor(Color.WHITE);
             setContentDescription(
-                    "Editable countertop redraw. Tap a piece to select it or tap a measurement to edit it.");
+                    "Editable countertop redraw. Tap a measurement to edit it. Tap a piece, then drag it with one finger to move it.");
+            setClickable(true);
+            setFocusable(true);
             fillPaint.setStyle(Paint.Style.FILL);
             linePaint.setStyle(Paint.Style.STROKE);
             linePaint.setStrokeJoin(Paint.Join.MITER);
@@ -9493,6 +9603,8 @@ public class MainActivity extends Activity {
             shapeSelectedListener = null;
             selectedDimensionIndex = -1;
             dimensionSelectedListener = null;
+            drawingMovedListener = null;
+            resetDragGesture();
             invalidate();
         }
 
@@ -9504,8 +9616,19 @@ public class MainActivity extends Activity {
             dimensionSelectedListener = listener;
         }
 
+        void setOnDrawingMovedListener(OnDrawingMovedListener listener) {
+            drawingMovedListener = listener;
+        }
+
         void clearShapeSelection() {
             selectedShapeIndex = -1;
+            invalidate();
+        }
+
+        void clearRectangleDraft() {
+            rectangleDraft = null;
+            rectangleDrawingEnabled = false;
+            rectangleDrawnListener = null;
             invalidate();
         }
 
@@ -9515,6 +9638,7 @@ public class MainActivity extends Activity {
             selectedDimensionIndex = -1;
             rectangleDrawnListener = listener;
             rectangleDrawingEnabled = true;
+            resetDragGesture();
             setContentDescription(
                     "AI verification redraw. Drag one corner to the opposite corner to add a rectangle.");
             invalidate();
@@ -9534,23 +9658,33 @@ public class MainActivity extends Activity {
             invalidate();
         }
 
-        boolean shiftRectangle(float deltaX, float deltaY) {
-            if (verificationDrawing == null || rectangleDraft == null) return false;
+        DrawingDragGesture.AppliedDelta shiftRectangle(float deltaX, float deltaY) {
+            if (verificationDrawing == null || rectangleDraft == null) {
+                return DrawingDragGesture.AppliedDelta.none();
+            }
             float canvasWidth = (float) verificationDrawing.optDouble(
                     "canvas_width",
                     DEFAULT_CANVAS_WIDTH);
             float canvasHeight = (float) verificationDrawing.optDouble(
                     "canvas_height",
                     DEFAULT_CANVAS_HEIGHT);
-            if (canvasWidth <= 0 || canvasHeight <= 0) return false;
+            if (canvasWidth <= 0 || canvasHeight <= 0) {
+                return DrawingDragGesture.AppliedDelta.none();
+            }
             float width = rectangleDraft.width();
             float height = rectangleDraft.height();
+            float previousLeft = rectangleDraft.left;
+            float previousTop = rectangleDraft.top;
             float left = Math.max(
                     0,
                     Math.min(canvasWidth - width, rectangleDraft.left + deltaX));
             float top = Math.max(
                     0,
                     Math.min(canvasHeight - height, rectangleDraft.top + deltaY));
+            DrawingDragGesture.AppliedDelta candidate = DrawingDragGesture.AppliedDelta.of(
+                    left - previousLeft,
+                    top - previousTop);
+            if (!candidate.moved) return candidate;
             rectangleDraft = new RectF(left, top, left + width, top + height);
             if (rectangleDrawnListener != null) {
                 rectangleDrawnListener.onRectangleDrawn(
@@ -9560,7 +9694,9 @@ public class MainActivity extends Activity {
                         rectangleDraft.bottom);
             }
             invalidate();
-            return true;
+            return DrawingDragGesture.AppliedDelta.of(
+                    rectangleDraft.left - previousLeft,
+                    rectangleDraft.top - previousTop);
         }
 
         float[] resizeRectangleToMeasurements(double lengthInches, double widthInches) {
@@ -9662,36 +9798,123 @@ public class MainActivity extends Activity {
                     Math.min(canvasHeight, (event.getY() - drawingTop) / scale));
 
             if (!rectangleDrawingEnabled) {
-                if (shapeSelectedListener == null && dimensionSelectedListener == null) {
+                if (shapeSelectedListener == null
+                        && dimensionSelectedListener == null
+                        && drawingMovedListener == null) {
                     return super.onTouchEvent(event);
                 }
-                if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
-                    getParent().requestDisallowInterceptTouchEvent(true);
+                int action = event.getActionMasked();
+                if (event.getPointerCount() > 1
+                        || action == MotionEvent.ACTION_POINTER_DOWN
+                        || action == MotionEvent.ACTION_POINTER_UP) {
+                    resetDragGesture();
+                    ignoreTouchUntilUp = true;
+                    getParent().requestDisallowInterceptTouchEvent(false);
                     return true;
                 }
-                if (event.getActionMasked() == MotionEvent.ACTION_UP) {
-                    getParent().requestDisallowInterceptTouchEvent(false);
-                    JSONArray shapes = verificationDrawing.optJSONArray("shapes");
-                    int exactShapeIndex = DrawingShapeGeometry.findContainingShape(
-                            shapes,
+                if (action == MotionEvent.ACTION_DOWN) {
+                    resetDragGesture();
+                    int dimensionIndex = findDimensionAt(canvasX, canvasY);
+                    if (dimensionIndex < 0 && drawingMovedListener != null) {
+                        float accessibleTolerance = DrawingDragGesture.accessibleRadius(
+                                getResources().getDisplayMetrics().density,
+                                scale);
+                        if (rectangleDraft != null && DrawingDragGesture.contains(
+                                rectangleDraft.left,
+                                rectangleDraft.top,
+                                rectangleDraft.right,
+                                rectangleDraft.bottom,
+                                canvasX,
+                                canvasY,
+                                accessibleTolerance)) {
+                            dragRectangleDraft = true;
+                        } else {
+                            JSONArray shapes = verificationDrawing.optJSONArray("shapes");
+                            dragShapeIndex = DrawingShapeGeometry.findContainingShape(
+                                    shapes,
+                                    canvasX,
+                                    canvasY);
+                            if (dragShapeIndex < 0) {
+                                dragShapeIndex = DrawingShapeGeometry.findNearestShape(
+                                        shapes,
+                                        canvasX,
+                                        canvasY,
+                                        accessibleTolerance);
+                            }
+                        }
+                        if (dragRectangleDraft || dragShapeIndex >= 0) {
+                            dragController.start(canvasX, canvasY);
+                        }
+                    }
+                    return true;
+                }
+                if (action == MotionEvent.ACTION_MOVE) {
+                    if (ignoreTouchUntilUp
+                            || (!dragRectangleDraft && dragShapeIndex < 0)
+                            || drawingMovedListener == null) return true;
+                    float touchSlop = ViewConfiguration.get(getContext()).getScaledTouchSlop()
+                            / Math.max(0.0001f, scale);
+                    DrawingDragGesture.AppliedDelta requested = dragController.requested(
                             canvasX,
-                            canvasY);
-                    if (exactShapeIndex >= 0 && shapeSelectedListener != null) {
-                        selectShape(exactShapeIndex);
+                            canvasY,
+                            touchSlop);
+                    if (!dragController.isDragging()) return true;
+                    getParent().requestDisallowInterceptTouchEvent(true);
+                    if (!dragRectangleDraft
+                            && dragShapeIndex >= 0
+                            && selectedShapeIndex != dragShapeIndex
+                            && shapeSelectedListener != null) {
+                        selectShape(dragShapeIndex);
+                    }
+                    if (requested.moved) {
+                        DrawingDragGesture.AppliedDelta applied =
+                                drawingMovedListener.onDrawingMoved(
+                                        dragShapeIndex,
+                                        dragRectangleDraft,
+                                        requested.deltaX,
+                                        requested.deltaY);
+                        dragController.applied(applied);
+                    }
+                    return true;
+                }
+                if (action == MotionEvent.ACTION_UP) {
+                    getParent().requestDisallowInterceptTouchEvent(false);
+                    if (ignoreTouchUntilUp) {
+                        resetDragGesture();
                         return true;
                     }
+                    if (dragController.isDragging()) {
+                        if (dragRectangleDraft) {
+                            setContentDescription(
+                                    "New rectangle moved. Enter its exact length and width, then save.");
+                        }
+                        resetDragGesture();
+                        performClick();
+                        return true;
+                    }
+                    JSONArray shapes = verificationDrawing.optJSONArray("shapes");
                     int dimensionIndex = findDimensionAt(canvasX, canvasY);
                     if (dimensionIndex >= 0 && dimensionSelectedListener != null) {
                         selectedDimensionIndex = dimensionIndex;
                         selectedShapeIndex = -1;
                         dimensionSelectedListener.onDimensionSelected(dimensionIndex);
                         invalidate();
+                        resetDragGesture();
                         performClick();
                         return true;
                     }
-                    float accessibleTolerance = Math.min(
-                            80f,
-                            Math.max(20f, 24f * getResources().getDisplayMetrics().density / scale));
+                    int exactShapeIndex = DrawingShapeGeometry.findContainingShape(
+                            shapes,
+                            canvasX,
+                            canvasY);
+                    if (exactShapeIndex >= 0 && shapeSelectedListener != null) {
+                        resetDragGesture();
+                        selectShape(exactShapeIndex);
+                        return true;
+                    }
+                    float accessibleTolerance = DrawingDragGesture.accessibleRadius(
+                            getResources().getDisplayMetrics().density,
+                            scale);
                     int nearShapeIndex = DrawingShapeGeometry.findNearestShape(
                             shapes,
                             canvasX,
@@ -9700,10 +9923,12 @@ public class MainActivity extends Activity {
                     if (nearShapeIndex >= 0 && shapeSelectedListener != null) {
                         selectShape(nearShapeIndex);
                     }
+                    resetDragGesture();
                     return true;
                 }
-                if (event.getActionMasked() == MotionEvent.ACTION_CANCEL) {
+                if (action == MotionEvent.ACTION_CANCEL) {
                     getParent().requestDisallowInterceptTouchEvent(false);
+                    resetDragGesture();
                     return true;
                 }
                 return true;
@@ -9742,7 +9967,8 @@ public class MainActivity extends Activity {
                         return true;
                     }
                     rectangleDrawingEnabled = false;
-                    setContentDescription("AI verification redraw with a new rectangle ready to save.");
+                    setContentDescription(
+                            "AI verification redraw with a new rectangle. Drag it with one finger to move it, then enter its exact length and width.");
                     if (rectangleDrawnListener != null) {
                         rectangleDrawnListener.onRectangleDrawn(
                                 rectangleDraft.left,
@@ -9761,6 +9987,13 @@ public class MainActivity extends Activity {
                 default:
                     return true;
             }
+        }
+
+        private void resetDragGesture() {
+            dragController.reset();
+            dragShapeIndex = -1;
+            dragRectangleDraft = false;
+            ignoreTouchUntilUp = false;
         }
 
         private int findDimensionAt(float x, float y) {
@@ -9851,9 +10084,58 @@ public class MainActivity extends Activity {
                     (selectedPiece == null
                             ? "Drawing shape"
                             : "Countertop piece " + selectedPiece.number)
-                            + " selected. Use the move arrows or edit its dimensions.");
+                            + " selected. Drag it with one finger to move it, or edit its exact length and width.");
             invalidate();
             performClick();
+        }
+
+        @Override
+        public void onInitializeAccessibilityNodeInfo(AccessibilityNodeInfo info) {
+            super.onInitializeAccessibilityNodeInfo(info);
+            if (drawingMovedListener == null
+                    || (rectangleDraft == null && selectedShapeIndex < 0)) return;
+            info.addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_LEFT);
+            info.addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_UP);
+            info.addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN);
+            info.addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_RIGHT);
+        }
+
+        @Override
+        public boolean performAccessibilityAction(int action, Bundle arguments) {
+            float deltaX = 0;
+            float deltaY = 0;
+            if (action == AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_LEFT.getId()) {
+                deltaX = -20;
+            } else if (action
+                    == AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_RIGHT.getId()) {
+                deltaX = 20;
+            } else if (action
+                    == AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_UP.getId()) {
+                deltaY = -20;
+            } else if (action
+                    == AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN.getId()) {
+                deltaY = 20;
+            } else {
+                return super.performAccessibilityAction(action, arguments);
+            }
+            boolean draftSelected = rectangleDraft != null;
+            int shapeIndex = draftSelected ? -1 : selectedShapeIndex;
+            if (drawingMovedListener == null || (!draftSelected && shapeIndex < 0)) {
+                return super.performAccessibilityAction(action, arguments);
+            }
+            DrawingDragGesture.AppliedDelta applied = drawingMovedListener.onDrawingMoved(
+                    shapeIndex,
+                    draftSelected,
+                    deltaX,
+                    deltaY);
+            if (applied != null && applied.moved) {
+                announceForAccessibility(draftSelected
+                        ? "New rectangle moved"
+                        : "Selected piece moved");
+                return true;
+            }
+            announceForAccessibility("Piece is at the edge of the redraw");
+            return true;
         }
 
         @Override

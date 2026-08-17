@@ -154,6 +154,35 @@ public final class DrawingRecord {
                 verificationDrawing);
     }
 
+    /** Keeps every usable prior edit while making an empty/partial timeout result editable. */
+    public DrawingRecord editableAfterTimeout(int revision, String message) {
+        JSONObject editableDrawing = verificationDrawing == null
+                ? DrawingFallback.blankEditable()
+                : verificationDrawing;
+        JSONArray editableParts = calculationParts == null
+                ? new JSONArray()
+                : calculationParts;
+        boolean keepCompletedPrice = analyzed && canCalculate;
+        String manualQuestion = keepCompletedPrice
+                ? missingInformation
+                : appendMessage(
+                        missingInformation,
+                        "AI took too long to finish. Draw or select each piece and enter its exact length and width in inches.");
+        return new DrawingRecord(
+                uri,
+                Math.max(0, revision),
+                true,
+                keepCompletedPrice ? squareFeet : 0,
+                keepCompletedPrice,
+                editedByUser,
+                confidence,
+                explanation,
+                manualQuestion,
+                message,
+                editableParts,
+                editableDrawing);
+    }
+
     JSONObject toJsonObject() {
         JSONObject result = new JSONObject();
         try {

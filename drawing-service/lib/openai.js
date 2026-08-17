@@ -3,12 +3,13 @@ import { normalizeModelResult, ModelResultError } from "./result.js";
 import { DRAWING_TEXT_FORMAT } from "./schema.js";
 
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
-const DEFAULT_MODEL = "gpt-5.6-sol";
-const DEFAULT_TIMEOUT_MS = 160_000;
-const MIN_TIMEOUT_MS = 15_000;
-const MAX_TIMEOUT_MS = 165_000;
 const MAX_RESPONSE_CHARACTERS = 2_000_000;
-const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/;
+
+export const PRODUCTION_OPENAI_SETTINGS = Object.freeze({
+  model: "gpt-5.6-sol",
+  reasoningEffort: "medium",
+  timeoutMs: 90_000
+});
 
 export async function analyzeDrawingWithOpenAI(
   drawingRequest,
@@ -25,38 +26,21 @@ export async function analyzeDrawingWithOpenAI(
     throw new OpenAIServiceError("configuration", "The server cannot contact Drawing AI.");
   }
 
-  const primaryModel = configuredModel(environment.OPENAI_DRAWING_MODEL, DEFAULT_MODEL);
-  const fallbackModel = configuredFallbackModel(environment.OPENAI_DRAWING_FALLBACK_MODEL);
-  const timeoutMs = openAITimeoutMs(environment.OPENAI_TIMEOUT_MS);
-  const reasoningEffort = openAIReasoningEffort(environment.OPENAI_REASONING_EFFORT);
-
-  try {
-    return await requestModel({
-      apiKey,
-      drawingRequest,
-      fetchImpl,
-      model: primaryModel,
-      reasoningEffort,
-      timeoutMs
-    });
-  } catch (error) {
-    if (!isModelUnavailable(error)
-        || !fallbackModel
-        || fallbackModel === primaryModel) {
-      throw error;
-    }
-    return requestModel({
-      apiKey,
-      drawingRequest,
-      fetchImpl,
-      model: fallbackModel,
-      reasoningEffort,
-      timeoutMs
-    });
-  }
+  // These production settings are deliberately code-owned. Stale dashboard variables must
+  // not change the reviewed model, reasoning, timeout, or one-request/no-fallback contract.
+  return requestModel({
+    apiKey,
+    drawingRequest,
+    fetchImpl,
+    ...PRODUCTION_OPENAI_SETTINGS
+  });
 }
 
-export function openAIRequestBody(model, drawingRequest, reasoningEffort = "high") {
+export function openAIRequestBody(
+  model,
+  drawingRequest,
+  reasoningEffort = PRODUCTION_OPENAI_SETTINGS.reasoningEffort
+) {
   return {
     model,
     instructions: DRAWING_INSTRUCTIONS,
@@ -213,50 +197,10 @@ function parseJsonObject(value) {
   }
 }
 
-function isModelUnavailable(error) {
-  if (!(error instanceof OpenAIServiceError) || error.kind !== "upstream") return false;
-  const code = String(error.details.upstreamCode || "").toLowerCase();
-  const message = String(error.details.upstreamMessage || "").toLowerCase();
-  return code === "model_not_found"
-    || code === "unsupported_model"
-    || code === "invalid_model"
-    || (error.details.statusCode === 404 && message.includes("model"))
-    || (error.details.statusCode === 400
-      && message.includes("model")
-      && (message.includes("not found")
-        || message.includes("does not exist")
-        || message.includes("not available")));
-}
-
-function configuredModel(value, fallback) {
-  const model = typeof value === "string" && value.trim() ? value.trim() : fallback;
-  if (!MODEL_NAME.test(model)) {
-    throw new OpenAIServiceError("configuration", "The Drawing AI model is not configured safely.");
-  }
-  return model;
-}
-
-function configuredFallbackModel(value) {
-  if (typeof value !== "string" || !value.trim()) return null;
-  const normalized = value.trim();
-  if (["none", "off", "disabled"].includes(normalized.toLowerCase())) return null;
-  if (!MODEL_NAME.test(normalized)) {
-    throw new OpenAIServiceError(
-      "configuration",
-      "The Drawing AI fallback model is not configured safely."
-    );
-  }
-  return normalized;
-}
-
-export function openAITimeoutMs(value) {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return DEFAULT_TIMEOUT_MS;
-  return Math.max(MIN_TIMEOUT_MS, Math.min(MAX_TIMEOUT_MS, Math.round(parsed)));
-}
-
 export function openAIReasoningEffort(value) {
-  if (value === undefined || value === null || value === "") return "high";
+  if (value === undefined || value === null || value === "") {
+    return PRODUCTION_OPENAI_SETTINGS.reasoningEffort;
+  }
   if (typeof value !== "string") {
     throw new OpenAIServiceError(
       "configuration",

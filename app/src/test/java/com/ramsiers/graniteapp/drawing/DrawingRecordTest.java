@@ -158,6 +158,41 @@ public class DrawingRecordTest {
         assertEquals(
                 "What is the island width in inches?",
                 result.missingInformation);
+        assertTrue(result.verificationDrawing != null);
+        assertTrue(result.verificationDrawing.getJSONArray("shapes").length() > 0);
+    }
+
+    @Test
+    public void timeoutRecoveryRetainsPriorShapeAndNeverGuessesANewOne() throws Exception {
+        JSONObject retainedDrawing = new JSONObject()
+                .put("canvas_width", 1000)
+                .put("canvas_height", 700)
+                .put("shapes", new JSONArray().put(rectangle("retained")))
+                .put("dimensions", new JSONArray());
+        DrawingRecord partial = new DrawingRecord(
+                "content://drawing/timeout",
+                4,
+                true,
+                0,
+                false,
+                false,
+                "low",
+                "",
+                "",
+                "",
+                new JSONArray(),
+                retainedDrawing);
+
+        DrawingRecord retained = partial.editableAfterTimeout(5, "Read timed out");
+        DrawingRecord blank = DrawingRecord.empty("content://drawing/blank")
+                .editableAfterTimeout(5, "Read timed out");
+
+        assertTrue(retained.hasResult());
+        assertFalse(retained.canCalculate);
+        assertEquals(1, retained.verificationDrawing.getJSONArray("shapes").length());
+        assertTrue(retained.missingInformation.contains("exact length and width"));
+        assertTrue(blank.hasResult());
+        assertEquals(0, blank.verificationDrawing.getJSONArray("shapes").length());
     }
 
     @Test

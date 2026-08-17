@@ -42,10 +42,10 @@ public class DrawingRetryPolicyTest {
     }
 
     @Test
-    public void automaticallyTriesDarkerCopyForIncompleteNormalResult() {
+    public void incompleteNormalResultNeverStartsAutomaticDarkerRequest() {
         DrawingRecord incomplete = record(false, DrawingFallback.blankEditable(), 0);
 
-        assertTrue(DrawingRetryPolicy.automaticallyTryEnhanced(false, incomplete));
+        assertFalse(DrawingRetryPolicy.automaticallyTryEnhanced(false, incomplete));
         assertFalse(DrawingRetryPolicy.automaticallyTryEnhanced(true, incomplete));
     }
 
@@ -62,6 +62,16 @@ public class DrawingRetryPolicyTest {
 
         assertSame(darker, DrawingRetryPolicy.preferMoreUseful(normal, darker));
         assertSame(darker, DrawingRetryPolicy.preferMoreUseful(darker, normal));
+    }
+
+    @Test
+    public void manualEnhancedRetryCannotReplaceCompleteOriginalWithIncompleteResult() {
+        DrawingRecord completeOriginal = record(true, DrawingFallback.blankEditable(), 1);
+        DrawingRecord incompleteEnhanced = record(false, DrawingFallback.blankEditable(), 0);
+
+        assertSame(
+                completeOriginal,
+                DrawingRetryPolicy.preferMoreUseful(completeOriginal, incompleteEnhanced));
     }
 
     private DrawingRecord record(

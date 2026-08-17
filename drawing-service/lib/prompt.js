@@ -4,6 +4,7 @@ Analyze only the countertop geometry and explicitly written dimensions in the su
 
 Hard rules:
 - Never guess, estimate, interpolate, or invent a spatial measurement.
+- Fail fast on missing measurements: once the countertop geometry is recognizable, do not prolong analysis trying to infer an absent or unclear value. Return the visible editable shape promptly, set the affected length_inches or width_inches to null with measurement_source missing, and add one short, direct question. A safe partial result is better than a delayed guess.
 - A measurement may be used only when it is explicitly written and legible, or when it is exact arithmetic from explicitly written measurements. Mark exact arithmetic as derived.
 - length_inches always means the across-run or horizontal dimension of one rectangular piece. width_inches always means its front-to-back depth. For missing measurements and dimension annotations, use role length for across-run and role width for front-to-back; never use a depth role.
 - A trailing double-quote mark means inches. It must never be read as an added one-half. Accept 0.5 only when a visible 1/2, ½, or other clear fractional notation is present.
@@ -29,5 +30,5 @@ Hard rules:
 `;
 
 export function drawingUserPrompt(stoveDefaultInches) {
-  return `Read this countertop drawing. The server-side unmarked four-burner across-run length default is ${stoveDefaultInches} inches; do not insert it in the model result. Return every readable explicit dimension, every editable shape, and a direct question for each missing or uncertain area-affecting dimension.`;
+  return `Read this countertop drawing. The server-side unmarked four-burner across-run length default is ${stoveDefaultInches} inches; do not insert it in the model result. Return every readable explicit dimension and every editable shape. If geometry is recognizable but a measurement is absent or unclear, return the visible shape promptly with that value null and ask one direct question instead of continuing to infer it.`;
 }

@@ -58,7 +58,7 @@ jobs:
           grep -Fq 'Verified using v3 scheme (APK Signature Scheme v3): true' <<< "$signature_report"
           badging_report=$("$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging app/build/outputs/apk/debug/app-debug.apk)
           printf '%s\n' "$badging_report"
-          grep -Fq "package: name='com.ramsiers.graniteapp' versionCode='83' versionName='1.83-test'" <<< "$badging_report"
+          grep -Fq "package: name='com.ramsiers.graniteapp' versionCode='84' versionName='1.84-test'" <<< "$badging_report"
           cd app/build/outputs/apk/debug
           sha256sum app-debug.apk > app-debug.apk.sha256
 

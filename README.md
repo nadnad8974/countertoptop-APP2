@@ -2,7 +2,7 @@
 
 Android test MVP for customer slab selection and countertop quote requests.
 
-## Included in test version 1.83
+## Included in test version 1.84
 
 - Scan MSI or other slab QR codes
 - Show the exact installed app version in the top-left of every workflow page
@@ -12,11 +12,13 @@ Android test MVP for customer slab selection and countertop quote requests.
 - Open saved MSI links
 - Upload up to six countertop drawings; start AI automatically, analyze each separately, and add only complete, verified estimates
 - Use the authenticated Ramsiers server-side GPT-5.6 Sol drawing reader without placing the OpenAI key in the app or GitHub
+- Make one AI reading per drawing by default; keep the enhanced black-and-white reading as a manual retry
 - Reject uncertain, contradictory, or unlinked AI measurements and ask for confirmation instead of pricing a guessed dimension
 - Crop each camera or Gallery drawing with a protected edge margin, analyze the original-color copy first, and offer an enhanced black-and-white retry when the first result is incomplete
 - Compare every original drawing with its own saved AI verification redraw
 - Zoom, edit redraw dimensions, correct shape/opening types, and add your own short labels
-- Keep the redraw controls visible while editing, move selected pieces with four arrow buttons, and resize from a fixed left/top edge so only the right/bottom edge extends
+- Tap a redraw piece and drag it with one finger to move it; keep exact length/width fields visible and resize from a fixed left/top edge so only the right/bottom edge extends
+- If the drawing service times out, stop waiting and open a blank or retained editable redraw without guessing a shape or measurement
 - Keep AI-written labels off the redraw; only labels you add yourself are shown
 - Render slide-in stove openings with the four-burner symbol and no automatic word label
 - Correct each formula piece as included, sink/cooktop, stove, or another deducted opening, and add a missing area correction

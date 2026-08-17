@@ -5,17 +5,18 @@ import {
   analyzeDrawingWithOpenAI,
   OpenAIServiceError,
   openAIReasoningEffort,
-  openAITimeoutMs,
-  openAIRequestBody
+  openAIRequestBody,
+  PRODUCTION_OPENAI_SETTINGS
 } from "../lib/openai.js";
 import { validateDrawingRequest } from "../lib/request.js";
-import { DRAWING_INSTRUCTIONS } from "../lib/prompt.js";
+import { DRAWING_INSTRUCTIONS, drawingUserPrompt } from "../lib/prompt.js";
 import { drawingBody, fixture, openAIResponse } from "./helpers.js";
 
 const ENVIRONMENT = {
   OPENAI_API_KEY: "mocked-api-token-value-never-sent",
-  OPENAI_DRAWING_MODEL: "gpt-5.6-sol",
+  OPENAI_DRAWING_MODEL: "gpt-4.1",
   OPENAI_DRAWING_FALLBACK_MODEL: "gpt-5",
+  OPENAI_REASONING_EFFORT: "high",
   OPENAI_TIMEOUT_MS: "15000"
 };
 
@@ -34,7 +35,7 @@ test("uses Responses with unchanged original detail and strict schema", async ()
   assert.equal(observed.options.headers.Authorization, `Bearer ${ENVIRONMENT.OPENAI_API_KEY}`);
   const payload = JSON.parse(observed.options.body);
   assert.equal(payload.model, "gpt-5.6-sol");
-  assert.equal(payload.reasoning.effort, "high");
+  assert.equal(payload.reasoning.effort, "medium");
   assert.equal(payload.store, false);
   assert.equal(payload.input[0].content[1].type, "input_image");
   assert.equal(payload.input[0].content[1].detail, "original");
@@ -44,6 +45,39 @@ test("uses Responses with unchanged original detail and strict schema", async ()
   assert.equal(payload.text.format.schema.additionalProperties, false);
   assert.equal(observed.options.body.includes(ENVIRONMENT.OPENAI_API_KEY), false);
   assert.equal(result.square_feet, 44.27);
+});
+
+test("production analysis ignores every stale model, fallback, reasoning, and timeout override", async () => {
+  const drawingRequest = validateDrawingRequest(drawingBody());
+  let calls = 0;
+  let observedPayload;
+  await analyzeDrawingWithOpenAI(drawingRequest, ENVIRONMENT, {
+    fetchImpl: async (_url, options) => {
+      calls += 1;
+      observedPayload = JSON.parse(options.body);
+      return openAIResponse(fixture("model-complete.json"));
+    }
+  });
+  assert.equal(calls, 1);
+  assert.equal(observedPayload.model, "gpt-5.6-sol");
+  assert.equal(observedPayload.reasoning.effort, "medium");
+});
+
+test("production analysis reads only the OpenAI API key from its environment", async () => {
+  const environment = new Proxy(
+    { OPENAI_API_KEY: ENVIRONMENT.OPENAI_API_KEY },
+    {
+      get(target, property) {
+        assert.equal(property, "OPENAI_API_KEY");
+        return target[property];
+      }
+    }
+  );
+  await analyzeDrawingWithOpenAI(
+    validateDrawingRequest(drawingBody()),
+    environment,
+    { fetchImpl: async () => openAIResponse(fixture("model-complete.json")) }
+  );
 });
 
 test("normalization failures retain only an allowlisted internal code", async () => {
@@ -76,13 +110,13 @@ test("normalization failures retain only an allowlisted internal code", async ()
   assert.equal(serializedError.includes(drawingRequest.imageDataUrl), false);
 });
 
-test("falls back only after a model-unavailable response", async () => {
+test("does not retry or fall back after a model-unavailable response", async () => {
   const drawingRequest = validateDrawingRequest(drawingBody());
   const models = [];
-  const result = await analyzeDrawingWithOpenAI(drawingRequest, ENVIRONMENT, {
-    fetchImpl: async (_url, options) => {
-      models.push(JSON.parse(options.body).model);
-      if (models.length === 1) {
+  await assert.rejects(
+    () => analyzeDrawingWithOpenAI(drawingRequest, ENVIRONMENT, {
+      fetchImpl: async (_url, options) => {
+        models.push(JSON.parse(options.body).model);
         return openAIResponse({
           error: {
             code: "model_not_found",
@@ -91,40 +125,10 @@ test("falls back only after a model-unavailable response", async () => {
           }
         }, 404);
       }
-      return openAIResponse(fixture("model-complete.json"));
-    }
-  });
-  assert.deepEqual(models, ["gpt-5.6-sol", "gpt-5"]);
-  assert.equal(result.can_calculate, true);
-});
-
-test("defaults to explicit gpt-5.6-sol with no fallback when absent, blank, or off", async (t) => {
-  for (const fallback of [undefined, "", "off"]) {
-    await t.test(fallback === undefined ? "absent" : JSON.stringify(fallback), async () => {
-      const drawingRequest = validateDrawingRequest(drawingBody());
-      const environment = {
-        OPENAI_API_KEY: ENVIRONMENT.OPENAI_API_KEY,
-        OPENAI_DRAWING_FALLBACK_MODEL: fallback
-      };
-      const models = [];
-      await assert.rejects(
-        () => analyzeDrawingWithOpenAI(drawingRequest, environment, {
-          fetchImpl: async (_url, options) => {
-            models.push(JSON.parse(options.body).model);
-            return openAIResponse({
-              error: {
-                code: "model_not_found",
-                type: "invalid_request_error",
-                message: "The requested model was not found."
-              }
-            }, 404);
-          }
-        }),
-        OpenAIServiceError
-      );
-      assert.deepEqual(models, ["gpt-5.6-sol"]);
-    });
-  }
+    }),
+    OpenAIServiceError
+  );
+  assert.deepEqual(models, ["gpt-5.6-sol"]);
 });
 
 test("does not retry rate limits with a different model", async () => {
@@ -164,16 +168,19 @@ test("the request builder contains no customer identity values or server secret 
   }
 });
 
-test("caps upstream work below the Vercel function maximum", () => {
-  assert.equal(openAITimeoutMs(undefined), 160_000);
-  assert.equal(openAITimeoutMs(1), 15_000);
-  assert.equal(openAITimeoutMs(180_000), 165_000);
-  assert.equal(openAITimeoutMs(999_999), 165_000);
+test("production OpenAI settings are exact, fixed, and below the Vercel maximum", () => {
+  assert.deepEqual(PRODUCTION_OPENAI_SETTINGS, {
+    model: "gpt-5.6-sol",
+    reasoningEffort: "medium",
+    timeoutMs: 90_000
+  });
+  assert.equal(Object.isFrozen(PRODUCTION_OPENAI_SETTINGS), true);
+  assert.ok(PRODUCTION_OPENAI_SETTINGS.timeoutMs < 180_000);
 });
 
-test("reasoning effort defaults high and accepts an explicit medium override", () => {
-  assert.equal(openAIReasoningEffort(undefined), "high");
-  assert.equal(openAIReasoningEffort(""), "high");
+test("request-builder test helper defaults medium and accepts explicit high", () => {
+  assert.equal(openAIReasoningEffort(undefined), "medium");
+  assert.equal(openAIReasoningEffort(""), "medium");
   assert.equal(openAIReasoningEffort("medium"), "medium");
   assert.equal(openAIReasoningEffort("HIGH"), "high");
   assert.equal(
@@ -206,4 +213,16 @@ test("prompt keeps inch marks separate from written half-inch fractions", () => 
   assert.match(DRAWING_INSTRUCTIONS, /#4.*14/i);
   assert.match(DRAWING_INSTRUCTIONS, /sq ft.*not a dimension/i);
   assert.match(DRAWING_INSTRUCTIONS, /source_kind measurement/i);
+});
+
+test("prompt returns editable geometry promptly instead of guessing a missing measurement", () => {
+  assert.match(DRAWING_INSTRUCTIONS, /fail fast on missing measurements/i);
+  assert.match(DRAWING_INSTRUCTIONS, /do not prolong analysis trying to infer/i);
+  assert.match(DRAWING_INSTRUCTIONS, /return the visible editable shape promptly/i);
+  assert.match(DRAWING_INSTRUCTIONS, /length_inches or width_inches to null/i);
+  assert.match(DRAWING_INSTRUCTIONS, /one short, direct question/i);
+  assert.match(DRAWING_INSTRUCTIONS, /safe partial result is better than a delayed guess/i);
+  assert.match(drawingUserPrompt(30), /return the visible shape promptly/i);
+  assert.match(drawingUserPrompt(30), /value null and ask one direct question/i);
+  assert.match(drawingUserPrompt(30), /instead of continuing to infer it/i);
 });
