@@ -1,0 +1,156 @@
+{
+  "schema_version": 3,
+  "units": "inches",
+  "can_calculate": false,
+  "confidence": "low",
+  "explanation": "The right-hand countertop piece is visible but its top length is not written.",
+  "warnings": ["One countertop piece is incomplete."],
+  "missing_measurements": [
+    {
+      "id": "missing_right_length",
+      "part_id": "right_piece",
+      "role": "length",
+      "question": "What is the top length in inches for the right-hand countertop piece?",
+      "reason": "No explicit top dimension is visible.",
+      "affects_square_feet": true
+    }
+  ],
+  "parts": [
+    {
+      "id": "main_run",
+      "feature_type": "countertop",
+      "operation": "add",
+      "length_inches": 100,
+      "width_inches": 25.5,
+      "quantity": 1,
+      "confidence": "high",
+      "measurement_source": "explicit"
+    },
+    {
+      "id": "right_piece",
+      "feature_type": "countertop",
+      "operation": "add",
+      "length_inches": null,
+      "width_inches": 25.5,
+      "quantity": 1,
+      "confidence": "low",
+      "measurement_source": "missing"
+    },
+    {
+      "id": "stove_opening",
+      "feature_type": "stove",
+      "operation": "subtract",
+      "length_inches": null,
+      "width_inches": 25.5,
+      "quantity": 1,
+      "confidence": "medium",
+      "measurement_source": "missing"
+    }
+  ],
+  "drawing": {
+    "canvas_width": 1000,
+    "canvas_height": 700,
+    "shapes": [
+      {
+        "id": "main_run",
+        "link_id": "main_run",
+        "feature_type": "countertop",
+        "kind": "countertop",
+        "opening_type": "none",
+        "burner_count": null,
+        "points": [
+          { "x": 50, "y": 80 },
+          { "x": 550, "y": 80 },
+          { "x": 550, "y": 220 },
+          { "x": 50, "y": 220 }
+        ]
+      },
+      {
+        "id": "right_piece",
+        "link_id": "right_piece",
+        "feature_type": "countertop",
+        "kind": "countertop",
+        "opening_type": "none",
+        "burner_count": null,
+        "points": [
+          { "x": 700, "y": 80 },
+          { "x": 900, "y": 80 },
+          { "x": 900, "y": 220 },
+          { "x": 700, "y": 220 }
+        ]
+      },
+      {
+        "id": "stove_opening",
+        "link_id": "stove_opening",
+        "feature_type": "stove",
+        "kind": "opening",
+        "opening_type": "stove",
+        "burner_count": 4,
+        "points": [
+          { "x": 550, "y": 80 },
+          { "x": 700, "y": 80 },
+          { "x": 700, "y": 220 },
+          { "x": 550, "y": 220 }
+        ]
+      }
+    ],
+    "dimensions": [
+      {
+        "part_id": "main_run",
+        "role": "length",
+        "value_inches": 100,
+        "label": "100 inches",
+        "source_text": "100\"",
+        "source_kind": "measurement",
+        "placement": "outside_shape",
+        "x1": 50,
+        "y1": 50,
+        "x2": 550,
+        "y2": 50,
+        "confidence": "high"
+      },
+      {
+        "part_id": "right_piece",
+        "role": "width",
+        "value_inches": 25.5,
+        "label": "25 1/2 inches",
+        "source_text": "25 1/2",
+        "source_kind": "measurement",
+        "placement": "outside_shape",
+        "x1": 920,
+        "y1": 80,
+        "x2": 920,
+        "y2": 220,
+        "confidence": "high"
+      },
+      {
+        "part_id": "main_run",
+        "role": "width",
+        "value_inches": 25.5,
+        "label": "25 1/2 inches",
+        "source_text": "25 1/2",
+        "source_kind": "measurement",
+        "placement": "outside_shape",
+        "x1": 25,
+        "y1": 80,
+        "x2": 25,
+        "y2": 220,
+        "confidence": "high"
+      },
+      {
+        "part_id": "stove_opening",
+        "role": "width",
+        "value_inches": 25.5,
+        "label": "25 1/2 inches",
+        "source_text": "25 1/2",
+        "source_kind": "measurement",
+        "placement": "on_dimension_line",
+        "x1": 550,
+        "y1": 240,
+        "x2": 700,
+        "y2": 240,
+        "confidence": "medium"
+      }
+    ]
+  }
+}

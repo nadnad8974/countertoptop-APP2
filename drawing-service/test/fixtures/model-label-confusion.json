@@ -1,0 +1,85 @@
+{
+  "schema_version": 3,
+  "units": "inches",
+  "can_calculate": true,
+  "confidence": "high",
+  "explanation": "A narrow piece was read as 10 by 14 inches.",
+  "warnings": [],
+  "missing_measurements": [],
+  "parts": [
+    {
+      "id": "narrow_piece",
+      "feature_type": "countertop",
+      "operation": "add",
+      "length_inches": 10,
+      "width_inches": 14,
+      "quantity": 1,
+      "confidence": "high",
+      "measurement_source": "explicit"
+    }
+  ],
+  "drawing": {
+    "canvas_width": 1000,
+    "canvas_height": 700,
+    "shapes": [
+      {
+        "id": "narrow_piece",
+        "link_id": "narrow_piece",
+        "feature_type": "countertop",
+        "kind": "countertop",
+        "opening_type": "none",
+        "burner_count": null,
+        "points": [
+          { "x": 300, "y": 150 },
+          { "x": 420, "y": 150 },
+          { "x": 420, "y": 500 },
+          { "x": 300, "y": 500 }
+        ]
+      }
+    ],
+    "dimensions": [
+      {
+        "part_id": "narrow_piece",
+        "role": "length",
+        "value_inches": 10,
+        "label": "10 inches",
+        "source_text": "10",
+        "source_kind": "measurement",
+        "placement": "outside_shape",
+        "x1": 300,
+        "y1": 120,
+        "x2": 420,
+        "y2": 120,
+        "confidence": "high"
+      },
+      {
+        "part_id": "narrow_piece",
+        "role": "width",
+        "value_inches": 14,
+        "label": "14 inches",
+        "source_text": "#4 0 sq ft",
+        "source_kind": "square_foot_annotation",
+        "placement": "inside_shape",
+        "x1": 340,
+        "y1": 250,
+        "x2": 380,
+        "y2": 350,
+        "confidence": "high"
+      },
+      {
+        "part_id": "narrow_piece",
+        "role": "width",
+        "value_inches": 25.5,
+        "label": "25 1/2 inches",
+        "source_text": "25 1/2",
+        "source_kind": "measurement",
+        "placement": "outside_shape",
+        "x1": 450,
+        "y1": 150,
+        "x2": 450,
+        "y2": 500,
+        "confidence": "high"
+      }
+    ]
+  }
+}
