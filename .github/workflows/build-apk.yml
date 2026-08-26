@@ -87,6 +87,19 @@ jobs:
           path: RamsiersGraniteApp-debug.apk
           retention-days: 30
 
+      - name: Publish stable phone download
+        if: success() && github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Ramsiers Granite App - Latest
+          body: |
+            Latest automatically built test version of the Ramsiers Granite App.
+
+            On an Android phone, download RamsiersGraniteApp-debug.apk below.
+          make_latest: true
+          files: RamsiersGraniteApp-debug.apk
+
       - name: Commit latest APK for phone download
         if: success() && github.event_name == 'push'
         run: |
