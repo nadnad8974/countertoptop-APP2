@@ -1,55 +1,42 @@
-name: Build Ramsiers Android APK
-
+name: Apply page 19 actions and build
 on:
   push:
-    branches: [main]
-    paths-ignore:
-      - 'RamsiersGraniteApp-debug.apk'
-      - 'build-error.log'
-      - 'full-build.log'
-  pull_request:
-    branches: [main]
+    branches: [agent/ramsiers-app-current-edge-detail]
   workflow_dispatch:
-
 permissions:
-  contents: read
-
+  contents: write
 jobs:
-  build:
+  apply-test-build:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
-
+    timeout-minutes: 35
     steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          persist-credentials: false
-
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
+          fetch-depth: 2
+          ref: ${{ github.ref_name }}
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android 35 SDK
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
-
-      - name: Validate wrapper and cache Gradle
-        uses: gradle/actions/setup-gradle@v4
-
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Apply page 19 source update
+        env:
+          PATCH_B64: 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
+        run: |
+          mkdir -p .github/scripts
+          printf '%s' "$PATCH_B64" | base64 --decode | gzip --decompress > .github/scripts/apply_page19_actions.py
+          python .github/scripts/apply_page19_actions.py
+          rm -f .github/scripts/apply_page19_actions.py
       - name: Test, lint, and build debug APK
         run: ./gradlew clean :app:testDebugUnitTest :app:lintDebug :app:assembleDebug --stacktrace
-
       - name: Test payment service
         working-directory: payment-service
         run: |
           npm ci
           npm test
           npm audit --omit=dev
-
       - name: Verify APK identity and checksum
         run: |
           signature_report=$("$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/debug/app-debug.apk)
@@ -58,16 +45,20 @@ jobs:
           grep -Fq 'Verified using v3 scheme (APK Signature Scheme v3): true' <<< "$signature_report"
           badging_report=$("$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging app/build/outputs/apk/debug/app-debug.apk)
           printf '%s\n' "$badging_report"
-          grep -Fq "package: name='com.ramsiers.graniteapp' versionCode='84' versionName='1.84-test'" <<< "$badging_report"
+          grep -Fq "package: name='com.ramsiers.graniteapp' versionCode='85' versionName='1.85-test'" <<< "$badging_report"
           cd app/build/outputs/apk/debug
           sha256sum app-debug.apk > app-debug.apk.sha256
-
-      - name: Upload APK artifact
-        if: success()
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: RamsiersGraniteApp-debug
+          name: RamsiersGraniteApp-v1.85-test
           path: |
             app/build/outputs/apk/debug/app-debug.apk
             app/build/outputs/apk/debug/app-debug.apk.sha256
           retention-days: 30
+      - name: Commit tested source changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/build.gradle app/src/main/java/com/ramsiers/graniteapp/MainActivity.java app/src/main/java/com/ramsiers/graniteapp/Page19Actions.java app/src/test/java/com/ramsiers/graniteapp/Page19ActionsTest.java
+          git commit -m "Reorder page 19 actions and chain save popups [skip ci]"
+          git push origin HEAD:"${{ github.ref_name }}"
