@@ -325,6 +325,9 @@ public class MainActivity extends Activity {
     private String currentJobId = "job_" + UUID.randomUUID().toString().replace("-", "");
     private String currentDriveFolderName = "";
     private boolean driveOperationInProgress;
+    private int pendingPage19SaveAction = Page19Actions.IDLE;
+    private boolean page19SaveWaitingForExternalReturn;
+    private long page19ExternalActionLaunchedAt;
     private boolean savedJobsMenuOpen;
     private String pendingProductImageKey;
     private String edgeDetail = "Eased and polished";
@@ -372,6 +375,7 @@ public class MainActivity extends Activity {
     private int pendingQrScanPurpose = QR_SCAN_NONE;
     private final Handler addressHandler = new Handler(Looper.getMainLooper());
     private final Handler drawingProgressHandler = new Handler(Looper.getMainLooper());
+    private final Handler page19ActionHandler = new Handler(Looper.getMainLooper());
     private Runnable addressLookupRunnable;
     private Runnable drawingProgressRunnable;
     private final Object drawingConnectionLock = new Object();
@@ -429,6 +433,7 @@ public class MainActivity extends Activity {
         super.onResume();
         activityResumed = true;
         maybeOpenPendingTimeoutRecovery();
+        maybeContinuePage19SaveSequenceAfterReturn();
     }
 
     @Override
@@ -3690,11 +3695,46 @@ public class MainActivity extends Activity {
 
     private void addPrintQuotePage() {
         hideKeyboard();
-        page.addView(questionTitle("Print or save the quote PDF"));
+        page.addView(questionTitle("Save, print, email, or text"));
         addEstimateSummary(calculateAndDisplay(false));
-        Button print = primaryButton("Print / Save PDF");
+        addHelp(
+                "Tap Save once. Calendar, Email, and Text will open one after another. "
+                        + "Review each screen and tap Save or Send yourself.");
+
+        Button save = primaryButton(Page19Actions.SAVE);
+        save.setOnClickListener(v -> startPage19SaveSequence());
+        page.addView(save);
+
+        Button print = secondaryButton(Page19Actions.PRINT);
         print.setOnClickListener(v -> printQuoteSummary());
         page.addView(print);
+
+        Button email = secondaryButton(Page19Actions.EMAIL);
+        email.setOnClickListener(v -> sendQuoteEmail());
+        page.addView(email);
+
+        Button text = secondaryButton(Page19Actions.TEXT);
+        text.setOnClickListener(v -> sendQuoteText(false));
+        page.addView(text);
+
+        Button calendar = secondaryButton(Page19Actions.CALENDAR);
+        calendar.setOnClickListener(v -> openPage19Calendar(false));
+        page.addView(calendar);
+
+        Button jobAcceptance = secondaryButton(Page19Actions.JOB_ACCEPTANCE);
+        jobAcceptance.setOnClickListener(v -> openWorkflowPage(
+                PAGE_CUSTOMER_SIGNATURE,
+                Page19Actions.JOB_ACCEPTANCE));
+        page.addView(jobAcceptance);
+
+        Button installation = secondaryButton(Page19Actions.INSTALLATION);
+        installation.setOnClickListener(v -> openWorkflowPage(
+                pageOrder.contains(PAGE_INSTALL_CALENDAR)
+                        ? PAGE_INSTALL_CALENDAR
+                        : PAGE_INSTALLATION_JOB,
+                Page19Actions.INSTALLATION));
+        page.addView(installation);
+
         addInlineNavigation();
     }
 
@@ -3759,6 +3799,273 @@ public class MainActivity extends Activity {
         print.setOnClickListener(v -> printQuoteSummary());
         page.addView(print);
         addInlineNavigation();
+    }
+
+    private void startPage19SaveSequence() {
+        hideKeyboard();
+        if (!requireCompleteCustomerName("saving the customer job")) return;
+        saveJobSnapshot();
+        page19ActionHandler.removeCallbacksAndMessages(null);
+        pendingPage19SaveAction = Page19Actions.firstAutomaticStep();
+        page19SaveWaitingForExternalReturn = false;
+        Toast.makeText(
+                this,
+                "Job saved. Calendar opens first, then Email, then Text.",
+                Toast.LENGTH_LONG).show();
+        continuePage19SaveSequence();
+    }
+
+    private void continuePage19SaveSequence() {
+        if (page19SaveWaitingForExternalReturn) return;
+        if (pendingPage19SaveAction == Page19Actions.CALENDAR_STEP) {
+            if (!openPage19Calendar(true)) advancePage19SaveSequence();
+            return;
+        }
+        if (pendingPage19SaveAction == Page19Actions.EMAIL_STEP) {
+            if (!sendQuoteEmail(true)) advancePage19SaveSequence();
+            return;
+        }
+        if (pendingPage19SaveAction == Page19Actions.TEXT_STEP) {
+            if (!sendQuoteText(true)) advancePage19SaveSequence();
+            return;
+        }
+        finishPage19SaveSequence();
+    }
+
+    private void advancePage19SaveSequence() {
+        if (pendingPage19SaveAction == Page19Actions.IDLE) return;
+        int next = Page19Actions.nextAutomaticStep(pendingPage19SaveAction);
+        if (next == Page19Actions.COMPLETE) {
+            finishPage19SaveSequence();
+            return;
+        }
+        pendingPage19SaveAction = next;
+        page19ActionHandler.postDelayed(this::continuePage19SaveSequence, 250);
+    }
+
+    private void finishPage19SaveSequence() {
+        boolean wasRunning = pendingPage19SaveAction != Page19Actions.IDLE;
+        pendingPage19SaveAction = Page19Actions.IDLE;
+        page19SaveWaitingForExternalReturn = false;
+        page19ExternalActionLaunchedAt = 0;
+        if (wasRunning) {
+            Toast.makeText(
+                    this,
+                    "Save, Calendar, Email, and Text steps are finished.",
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void maybeContinuePage19SaveSequenceAfterReturn() {
+        if (!page19SaveWaitingForExternalReturn
+                || pendingPage19SaveAction == Page19Actions.IDLE) return;
+        page19SaveWaitingForExternalReturn = false;
+        long elapsed = Math.max(
+                0,
+                SystemClock.elapsedRealtime() - page19ExternalActionLaunchedAt);
+        long delay = Math.max(150, 450 - elapsed);
+        page19ActionHandler.postDelayed(this::advancePage19SaveSequence, delay);
+    }
+
+    private boolean openPage19Calendar(boolean automatic) {
+        if (!requireCompleteCustomerName("opening the customer calendar appointment")) {
+            return false;
+        }
+        if (templateAppointmentMillis <= 0) {
+            showPage19CalendarPicker(automatic);
+            return true;
+        }
+        return launchPage19Calendar(automatic);
+    }
+
+    private void showPage19CalendarPicker(boolean automatic) {
+        Calendar initial = Calendar.getInstance();
+        if (templateAppointmentMillis > 0) {
+            initial.setTimeInMillis(templateAppointmentMillis);
+        } else {
+            initial.add(Calendar.DAY_OF_MONTH, 1);
+            initial.set(Calendar.MINUTE, 0);
+            initial.set(Calendar.SECOND, 0);
+            initial.set(Calendar.MILLISECOND, 0);
+        }
+
+        DatePickerDialog datePicker = new DatePickerDialog(
+                this,
+                (dateView, year, month, dayOfMonth) -> {
+                    Calendar selected = Calendar.getInstance();
+                    selected.setTimeInMillis(initial.getTimeInMillis());
+                    selected.set(Calendar.YEAR, year);
+                    selected.set(Calendar.MONTH, month);
+                    selected.set(Calendar.DAY_OF_MONTH, dayOfMonth);
+
+                    TimePickerDialog timePicker = new TimePickerDialog(
+                            this,
+                            (timeView, hourOfDay, minute) -> {
+                                selected.set(Calendar.HOUR_OF_DAY, hourOfDay);
+                                selected.set(Calendar.MINUTE, minute);
+                                selected.set(Calendar.SECOND, 0);
+                                selected.set(Calendar.MILLISECOND, 0);
+                                templateAppointmentMillis = selected.getTimeInMillis();
+                                templateDateTime.setText(new SimpleDateFormat(
+                                        "EEE, MMM d, yyyy 'at' h:mm a",
+                                        Locale.US).format(new Date(templateAppointmentMillis)));
+                                saveJobSnapshot();
+                                if (!launchPage19Calendar(automatic) && automatic) {
+                                    advancePage19SaveSequence();
+                                }
+                            },
+                            initial.get(Calendar.HOUR_OF_DAY),
+                            initial.get(Calendar.MINUTE),
+                            false);
+                    timePicker.setOnCancelListener(dialog -> {
+                        if (automatic) advancePage19SaveSequence();
+                    });
+                    timePicker.show();
+                },
+                initial.get(Calendar.YEAR),
+                initial.get(Calendar.MONTH),
+                initial.get(Calendar.DAY_OF_MONTH));
+        datePicker.setOnCancelListener(dialog -> {
+            if (automatic) advancePage19SaveSequence();
+        });
+        datePicker.show();
+    }
+
+    private boolean launchPage19Calendar(boolean automatic) {
+        if (templateAppointmentMillis <= 0) return false;
+        Intent calendar = new Intent(
+                Intent.ACTION_INSERT,
+                CalendarContract.Events.CONTENT_URI);
+        calendar.putExtra(
+                CalendarContract.Events.TITLE,
+                "TP " + calendarJobName());
+        calendar.putExtra(
+                CalendarContract.Events.EVENT_LOCATION,
+                projectAddress.getText().toString().trim());
+        calendar.putExtra(
+                CalendarContract.Events.DESCRIPTION,
+                "Template appointment for " + customerFullName()
+                        + "\nPhone: " + text(customerPhone)
+                        + "\nAddress: " + text(projectAddress));
+        calendar.putExtra(
+                CalendarContract.EXTRA_EVENT_BEGIN_TIME,
+                templateAppointmentMillis);
+        calendar.putExtra(
+                CalendarContract.EXTRA_EVENT_END_TIME,
+                templateAppointmentMillis + 90 * 60 * 1000L);
+        calendar.putExtra(
+                CalendarContract.Events.AVAILABILITY,
+                CalendarContract.Events.AVAILABILITY_BUSY);
+        return launchPage19ExternalAction(
+                calendar,
+                "Review and save calendar appointment",
+                automatic,
+                "No calendar app was found on this phone.");
+    }
+
+    private boolean sendQuoteText(boolean automatic) {
+        if (!requireCompleteCustomerName("preparing the customer's text message")) {
+            return false;
+        }
+        if (!drawingRecords.isEmpty()
+                && !hasCompleteAiDrawingEstimate()
+                && manualCountertopSquareFeet() <= 0) {
+            Toast.makeText(
+                    this,
+                    "The drawing estimate is incomplete. Re-run AI, correct the redraw, or enter the measurements manually before texting the quote.",
+                    Toast.LENGTH_LONG).show();
+            return false;
+        }
+        String phone = customerPhone.getText().toString().trim();
+        if (phone.isEmpty()) {
+            Toast.makeText(
+                    this,
+                    "Enter the customer's phone number before texting the quote.",
+                    Toast.LENGTH_LONG).show();
+            return false;
+        }
+        try {
+            Estimate estimate = calculateAndDisplay(false);
+            File quoteDirectory = new File(getFilesDir(), "quote_jpegs");
+            if (!quoteDirectory.exists() && !quoteDirectory.mkdirs()) {
+                throw new IllegalStateException("Could not create quote picture folder");
+            }
+            File quoteImage = new File(
+                    quoteDirectory,
+                    "Ramsiers-Quote-" + safeFileName(customerFullName()) + ".jpg");
+            QuotePdfGenerator.createJpeg(
+                    quoteImage,
+                    buildQuotePdfData(estimate));
+            Uri imageUri = FileProvider.getUriForFile(
+                    this,
+                    getPackageName() + ".fileprovider",
+                    quoteImage);
+            String messageText = "Ramsier's Granite and Quartz\n"
+                    + "Your countertop quote is attached.\n"
+                    + "Estimated total: " + money(estimate.total) + "\n"
+                    + "Please review it. The final price is verified after templating.";
+
+            Intent message = new Intent(Intent.ACTION_SEND);
+            message.setType("image/jpeg");
+            message.putExtra("address", phone);
+            message.putExtra("sms_body", messageText);
+            message.putExtra(Intent.EXTRA_TEXT, messageText);
+            message.putExtra(Intent.EXTRA_STREAM, imageUri);
+            message.setClipData(ClipData.newUri(
+                    getContentResolver(),
+                    "Ramsier's countertop quote",
+                    imageUri));
+            message.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            return launchPage19ExternalAction(
+                    message,
+                    "Review and text the customer's quote",
+                    automatic,
+                    "No messaging app was found on this phone.");
+        } catch (Exception exception) {
+            if (automatic) page19SaveWaitingForExternalReturn = false;
+            Toast.makeText(
+                    this,
+                    "The quote picture could not be created. Nothing was sent.",
+                    Toast.LENGTH_LONG).show();
+            return false;
+        }
+    }
+
+    private boolean launchPage19ExternalAction(
+            Intent intent,
+            String chooserTitle,
+            boolean automatic,
+            String failureMessage) {
+        try {
+            if (automatic) {
+                page19SaveWaitingForExternalReturn = true;
+                page19ExternalActionLaunchedAt = SystemClock.elapsedRealtime();
+            }
+            startActivity(Intent.createChooser(intent, chooserTitle));
+            return true;
+        } catch (Exception exception) {
+            if (automatic) {
+                page19SaveWaitingForExternalReturn = false;
+                page19ExternalActionLaunchedAt = 0;
+            }
+            Toast.makeText(this, failureMessage, Toast.LENGTH_LONG).show();
+            return false;
+        }
+    }
+
+    private void openWorkflowPage(int pageId, String actionName) {
+        int targetIndex = pageOrder.indexOf(pageId);
+        if (targetIndex < 0) {
+            Toast.makeText(
+                    this,
+                    actionName + " is not in the current page list.",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        finishPage19SaveSequence();
+        hideKeyboard();
+        stepIndex = targetIndex;
+        showStep();
     }
 
     private void addCalendarPage(boolean template) {
@@ -7748,7 +8055,11 @@ public class MainActivity extends Activity {
     }
 
     private void sendQuoteEmail() {
-        if (!requireCompleteCustomerName("preparing the office quote email")) return;
+        sendQuoteEmail(false);
+    }
+
+    private boolean sendQuoteEmail(boolean automatic) {
+        if (!requireCompleteCustomerName("preparing the office quote email")) return false;
         if (!drawingRecords.isEmpty()
                 && !hasCompleteAiDrawingEstimate()
                 && manualCountertopSquareFeet() <= 0) {
@@ -7756,7 +8067,7 @@ public class MainActivity extends Activity {
                     this,
                     "The drawing estimate is incomplete and cannot be used for a quote yet. Re-run AI, correct it in the redraw editor, or enter the countertop measurements manually.",
                     Toast.LENGTH_LONG).show();
-            return;
+            return false;
         }
         String to = officeEmail.getText().toString().trim();
         if (!to.isEmpty() && to.contains("@")) {
@@ -7845,11 +8156,11 @@ public class MainActivity extends Activity {
             }
             email.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         }
-        try {
-            startActivity(Intent.createChooser(email, "Send quote request by email"));
-        } catch (Exception e) {
-            Toast.makeText(this, "No email app was found on this phone.", Toast.LENGTH_LONG).show();
-        }
+        return launchPage19ExternalAction(
+                email,
+                "Send quote request by email",
+                automatic,
+                "No email app was found on this phone.");
     }
 
     private void confirmReset() {
@@ -7864,6 +8175,10 @@ public class MainActivity extends Activity {
     private void resetQuote() {
         currentJobId = "job_" + UUID.randomUUID().toString().replace("-", "");
         currentDriveFolderName = "";
+        pendingPage19SaveAction = Page19Actions.IDLE;
+        page19SaveWaitingForExternalReturn = false;
+        page19ExternalActionLaunchedAt = 0;
+        page19ActionHandler.removeCallbacksAndMessages(null);
         paymentLinkRequestInProgress = false;
         paymentQuoteReference = "";
         paymentQuoteAmountCents = -1;
