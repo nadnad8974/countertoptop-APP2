@@ -1,0 +1,12 @@
+{
+  "name": "ramsiers-quickbooks-service",
+  "version": "0.1.0",
+  "private": true,
+  "description": "QuickBooks Desktop Web Connector bridge for Ramsiers invoice creation.",
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
