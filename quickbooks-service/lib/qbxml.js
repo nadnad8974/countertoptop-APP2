@@ -1,5 +1,7 @@
 'use strict';
 
+const QBXML_VERSION = '14.0';
+
 function xml(value) {
   return String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -30,9 +32,13 @@ function validateInvoice(invoice) {
   if (lineTotal !== invoice.totalCents) throw new Error('Invoice line total does not match totalCents');
 }
 
+function envelope(body) {
+  return `<?xml version="1.0"?>\n<?qbxml version="${QBXML_VERSION}"?>\n<QBXML><QBXMLMsgsRq onError="stopOnError">${body}</QBXMLMsgsRq></QBXML>`;
+}
+
 function customerQuery(invoice) {
   validateInvoice(invoice);
-  return `<?xml version="1.0"?>\n<?qbxml version="16.0"?>\n<QBXML><QBXMLMsgsRq onError="stopOnError"><CustomerQueryRq requestID="customer:${xml(invoice.jobId)}"><FullName>${xml(invoice.customerName)}</FullName></CustomerQueryRq></QBXMLMsgsRq></QBXML>`;
+  return envelope(`<CustomerQueryRq requestID="customer:${xml(invoice.jobId)}"><FullName>${xml(invoice.customerName)}</FullName></CustomerQueryRq>`);
 }
 
 function customerAdd(invoice) {
@@ -40,7 +46,7 @@ function customerAdd(invoice) {
   const phone = String(invoice.phone || '').trim();
   const email = String(invoice.email || '').trim();
   const address = String(invoice.projectAddress || '').trim();
-  return `<?xml version="1.0"?>\n<?qbxml version="16.0"?>\n<QBXML><QBXMLMsgsRq onError="stopOnError"><CustomerAddRq requestID="customer-add:${xml(invoice.jobId)}"><CustomerAdd><Name>${xml(invoice.customerName)}</Name>${phone ? `<Phone>${xml(phone)}</Phone>` : ''}${email ? `<Email>${xml(email)}</Email>` : ''}${address ? `<BillAddress><Addr1>${xml(address)}</Addr1></BillAddress>` : ''}</CustomerAdd></CustomerAddRq></QBXMLMsgsRq></QBXML>`;
+  return envelope(`<CustomerAddRq requestID="customer-add:${xml(invoice.jobId)}"><CustomerAdd><Name>${xml(invoice.customerName)}</Name>${phone ? `<Phone>${xml(phone)}</Phone>` : ''}${email ? `<Email>${xml(email)}</Email>` : ''}${address ? `<BillAddress><Addr1>${xml(address)}</Addr1></BillAddress>` : ''}</CustomerAdd></CustomerAddRq>`);
 }
 
 function invoiceAdd(invoice, options = {}) {
@@ -50,7 +56,7 @@ function invoiceAdd(invoice, options = {}) {
   const lineXml = invoice.lines.map((line) =>
     `<InvoiceLineAdd><ItemRef><FullName>${xml(line.itemName)}</FullName></ItemRef>${line.description ? `<Desc>${xml(line.description)}</Desc>` : ''}<Amount>${moneyFromCents(line.amountCents)}</Amount></InvoiceLineAdd>`
   ).join('');
-  return `<?xml version="1.0"?>\n<?qbxml version="16.0"?>\n<QBXML><QBXMLMsgsRq onError="stopOnError"><InvoiceAddRq requestID="invoice:${xml(invoice.jobId)}"><InvoiceAdd><CustomerRef><FullName>${xml(invoice.customerName)}</FullName></CustomerRef><RefNumber>${xml(refNumber)}</RefNumber>${memo ? `<Memo>${xml(memo)}</Memo>` : ''}${lineXml}</InvoiceAdd></InvoiceAddRq></QBXMLMsgsRq></QBXML>`;
+  return envelope(`<InvoiceAddRq requestID="invoice:${xml(invoice.jobId)}"><InvoiceAdd><CustomerRef><FullName>${xml(invoice.customerName)}</FullName></CustomerRef><RefNumber>${xml(refNumber)}</RefNumber>${memo ? `<Memo>${xml(memo)}</Memo>` : ''}${lineXml}</InvoiceAdd></InvoiceAddRq>`);
 }
 
-module.exports = { xml, moneyFromCents, validateInvoice, customerQuery, customerAdd, invoiceAdd };
+module.exports = { QBXML_VERSION, xml, moneyFromCents, validateInvoice, customerQuery, customerAdd, invoiceAdd };
